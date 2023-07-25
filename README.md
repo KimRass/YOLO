@@ -1,19 +1,11 @@
+# Object Detection
+- References:
+    - https://machinethink.net/blog/object-detection/
+- Each box also has a confidence score that says how likely the model thinks this box really contains an object.
+- The score of 52.14% given here is a combination of the class score, which was 82.16% dog, and a confidence score of how likely it is that the bounding box really contains an object, which was 63.47%.
+
 # Paper Summary
 - [You Only Look Once: Unified, Real-Time Object Detection](https://arxiv.org/pdf/1506.02640.pdf)
-## Related Works
-- Current detection systems repurpose classifiers to perform detection.
-- Deformable Parts Models (DPM) [10]
-    - Systems like deformable parts models (DPM) use a sliding window approach where the classifier is run at evenly spaced locations over the entire image.
-- R-CNN [13]
-    - More recent approaches like R-CNN use region proposal methods to first generate potential bounding boxes in an image and then run a classifier on these proposed boxes. After classification, post-processing is used to refine the bounding boxes, eliminate duplicate detections, and rescore the boxes based on other objects in the scene.
-- ***These complex pipelines are slow and hard to optimize because each individual component must be trained separately.***
-- A single convolutional network simultaneously predicts multiple bounding boxes and class probabilities for those boxes. ***Unlike sliding window and region proposal-based techniques, YOLO sees the entire image during training and test time so it implicitly encodes contextual information about classes as well as their appearance.***
-- Fast R-CNN [14]
-    - ***Fast R-CNN, a top detection method, mistakes background patches in an image for objects because it can’t see the larger context.***
-    - YOLO makes less than half the number of background errors compared to Fast R-CNN.
-    - Fast R-CNN speeds up the classification stage of R-CNN but it still relies on selective search which can take around 2 seconds per image to generate bounding box proposals.
-- Faster R-CNN [28]
-    - The recent Faster R-CNN replaces selective search with a neural network to propose bounding boxes
 ## Methodology
 - YOLO still lags behind state-of-the-art detection systems in accuracy. ***While it can quickly identify objects in images it struggles to precisely localize some objects, especially small ones. Our network uses features from the entire image to predict each bounding box. It also predicts all bounding boxes across all classes for an image simultaneously.*** The YOLO design enables end-to-end training and real-time speeds while maintaining high average precision.
 - ***Our system divides the input image into an*** $S \times S$ ***grid. If the center of an object falls into a grid cell, that grid cell is responsible for detecting that object. Each grid cell predicts*** $B$ ***bounding boxes and confidence scores for those boxes. These confidence scores reflect how confident the model is that the box contains an object and also how accurate it thinks the box is that it predicts.***
@@ -70,10 +62,6 @@ $$
     - We introduce random scaling and translations of up to 20% of the original image size. We also randomly adjust the exposure and saturation of the image by up to a factor of 1.5 in the HSV color space.
 ## Evaluation
 - For evaluating YOLO on PASCAL VOC, we use $S = 7$, $B = 2$. PASCAL VOC has 20 labelled classes so $C = 20$. Our final prediction is a $7 \times 7 \times 30$ tensor. We implement this model as a convolutional neural network and evaluate it on the PASCAL VOC detection dataset [9].
-## Experiments
-- Figure 4
-    - <img src="https://user-images.githubusercontent.com/105417680/227087856-0bee08bd-0396-452f-aed5-41d6c7352030.png" width="400">
-    - YOLO struggles to localize objects correctly. Localization errors account for more of YOLO’s errors than all other sources combined. Fast R-CNN makes much fewer localization errors but far more background errors. 13.6% of it’s top detections are false positives that don’t contain any objects. Fast R-CNN is almost 3x more likely to predict background detections than YOLO.
 ## References
 - [9]
     - [Visual Object Classes Challenge 2012 (VOC2012)](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/#devkit)
