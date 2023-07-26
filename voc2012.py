@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import extcolors
 
-from image_utils import (
+from utils import (
     _to_array,
     _to_pil,
     load_image,
@@ -22,12 +22,12 @@ from image_utils import (
     show_image
 )
 
-voc_classes = [
+VOC_CLASSES = [
     "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"
 ]
 
 
-def parse_voc2012_xml_file(xml_path, voc_classes=voc_classes):
+def parse_voc2012_xml_file(xml_path, VOC_CLASSES=VOC_CLASSES):
     xtree = et.parse(xml_path)
     xroot = xtree.getroot()
 
@@ -39,7 +39,7 @@ def parse_voc2012_xml_file(xml_path, voc_classes=voc_classes):
             int(bbox.find("bndbox").find("ymin").text),
             int(bbox.find("bndbox").find("xmax").text),
             int(bbox.find("bndbox").find("ymax").text),
-            voc_classes.index(xroot.find("object").find("name").text)
+            VOC_CLASSES.index(xroot.find("object").find("name").text)
         ) for bbox in xroot.findall("object")
     ], columns=("x1", "y1", "x2", "y2", "label"))
     return img, bboxes
@@ -135,7 +135,11 @@ class VOC2012Dataset(Dataset):
 
     def __getitem__(self, idx):
         xml_path = list(Path(self.root).glob("*.xml"))[idx]
+        xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000032.xml"
         img, bboxes = parse_voc2012_xml_file(xml_path)
+        temp = _normalize_bboxes_coordinates(bboxes=bboxes, img=img)
+        bboxes
+        temp
         gt = generate_ground_truth(img=img, bboxes=bboxes)
         image = _to_pil(img)
         if self.transform is not None:
@@ -160,7 +164,7 @@ if __name__ == "__main__":
 
 
 # bboxes = np.array([
-#     [int(coord.text) for coord in obj.find("bndbox")] + [voc_classes.index(obj.find("name").text)]
+#     [int(coord.text) for coord in obj.find("bndbox")] + [VOC_CLASSES.index(obj.find("name").text)]
 #     for obj
 #     in xroot
 #     if obj.tag == "object"

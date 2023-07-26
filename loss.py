@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as T
 from torchvision.ops import generalized_box_iou_loss
+from torchvision.ops import box_iou
 from torch.utils.data import Dataset, DataLoader
 import cv2
 import numpy as np
@@ -17,11 +18,47 @@ import pandas as pd
 from pathlib import Path
 from PIL import Image
 
-from yolo import Darknet, YOLO
-from parepare_voc2012 import Transform, VOC2012Dataset
+from model import Darknet, YOLO
+from voc2012 import Transform, VOC2012Dataset
 from image_utils import resize_image
 
 np.set_printoptions(precision=3, suppress=True)
+
+
+def get_masks(gt):
+    obj_mask = gt[:, 4, :, :] > 0
+    obj_mask = obj_mask.unsqueeze(1).expand_as(gt)
+    noobj_mask = torch.logical_not(obj_mask)
+    return obj_mask, noobj_mask
+
+
+class Yolov1Loss(nn.Module):
+    def __init__(self, lamb_coord=5, lamb_noobj=0.5, n_bboxes=2, n_classes=20):
+        super().__init__()
+
+        self.lamb_coord = lamb_coord
+        self.lamb_noobj = lamb_noobj
+        self.n_bboxes = n_bboxes
+        self.n_classes = n_classes
+    
+    def forward(self, gt, pred):
+        lamb_coord=5
+        lamb_noobj=0.5
+        n_bboxes=2
+        n_classes=20
+        gt = torch.randn((2, 30, 7, 7))
+        pred = torch.randn((2, 30, 7, 7))
+        
+        obj_mask, noobj_mask = get_masks(gt)
+        (pred * obj_mask).shape
+        pred[obj_mask].shape
+        pred[noobj_mask].shape
+
+
+
+
+
+
 
 
 def tensor_to_array(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
@@ -34,15 +71,8 @@ def tensor_to_array(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
 
 
 def get_whether_each_predictor_is_responsible(gt, pred):
-    # b, _, _, _ = pred.shape
-    # confs = pred[:, (4, 9), ...]
-    # argmax = torch.argmax(confs, dim=1)
-    # onehot = F.one_hot(argmax, num_classes=2).permute(0, 3, 1, 2)
-    # is_resp = torch.concat(
-    #     [onehot[:, k: k + 1, ...].repeat(1, 5, 1, 1) for k in range(n_bboxes)] +\
-    #         [torch.ones((b, n_classes, n_cells, n_cells))],
-    #     dim=1
-    # )
+    gt = torch.randn((1, 30, 7, 7))
+    pred = torch.randn((1, 30, 7, 7))
     b, _, h, w = gt.shape
     gt_bboxes = gt[:, : 4, ...].permute(0, 2, 3, 1).reshape((-1, 4))
     gt_bboxes[:, 2] += gt_bboxes[:, 0]

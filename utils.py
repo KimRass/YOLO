@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
+
 def load_image(img_path):
     img_path = str(img_path)
     img = cv2.imread(img_path, flags=cv2.IMREAD_COLOR)
