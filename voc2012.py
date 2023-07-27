@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import extcolors
+import random
 
 from utils import (
     _to_array,
@@ -27,11 +28,9 @@ VOC_CLASSES = [
 ]
 
 
-def parse_voc2012_xml_file(xml_path, VOC_CLASSES=VOC_CLASSES):
+def parse_xml_file(xml_path):
     xtree = et.parse(xml_path)
     xroot = xtree.getroot()
-
-    img = load_image(Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text)
 
     bboxes = pd.DataFrame([
         (
@@ -42,7 +41,10 @@ def parse_voc2012_xml_file(xml_path, VOC_CLASSES=VOC_CLASSES):
             VOC_CLASSES.index(xroot.find("object").find("name").text)
         ) for bbox in xroot.findall("object")
     ], columns=("x1", "y1", "x2", "y2", "label"))
-    return img, bboxes
+
+    img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
+    image = Image.open(img_path).convert("RGB")
+    return image, bboxes
 
 
 def _normalize_bboxes_coordinates(bboxes, img, img_size=448):
@@ -136,7 +138,25 @@ class VOC2012Dataset(Dataset):
     def __getitem__(self, idx):
         xml_path = list(Path(self.root).glob("*.xml"))[idx]
         xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000032.xml"
-        img, bboxes = parse_voc2012_xml_file(xml_path)
+        image, bboxes = parse_xml_file(xml_path)
+        drawn = draw_bboxes(image)
+
+        w, h = image.size
+        scale = random.uniform(0.8, 1.2)
+        T.Resize(size=(round(h * scale), round(w * scale)), antialias=True)(image).size
+        bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]]
+
+        bboxes[["x1", "y1", "x2", "y2"]].apply(lambda x: list(map(int, round(x * scale))), axis=1)
+
+
+
+
+
+
+        
+        xroot.find("filename").text
+        Image.open(
+        img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text)
         temp = _normalize_bboxes_coordinates(bboxes=bboxes, img=img)
         bboxes
         temp
@@ -162,12 +182,4 @@ if __name__ == "__main__":
         yolo = YOLO(darknet=darknet, n_classes=20)
         pred = yolo(image)
 
-
-# bboxes = np.array([
-#     [int(coord.text) for coord in obj.find("bndbox")] + [VOC_CLASSES.index(obj.find("name").text)]
-#     for obj
-#     in xroot
-#     if obj.tag == "object"
-# ])
-# bboxs = bboxes[:, :4]
-# labels = bboxes[:, 4]
+# "we introduce random scaling and translations of up to 20% of the original image size. We also randomly adjust the exposure and saturation of the image by up to a factor of 1:5 in the HSV color space."

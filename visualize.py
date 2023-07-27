@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from itertools import product
 import cv2
+from PIL import Image, ImageDraw
 import pandas as pd
 from pathlib import Path
 
@@ -23,6 +24,22 @@ from image_utils import (
     _get_canvas_same_size_as_image,
     draw_bboxes
 )
+
+
+def draw_bboxes(image):
+    draw = ImageDraw.Draw(image)
+    for row in bboxes.itertuples():
+        draw.rectangle(
+            xy=(row.x1, row.y1, row.x2, row.y2), outline=(0, 255, 0), width=2
+        )
+    return image
+
+
+
+
+
+
+
 
 voc_classes = [
     "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"
