@@ -26,13 +26,6 @@ from image_utils import (
 )
 
 
-def draw_bboxes(image):
-    draw = ImageDraw.Draw(image)
-    for row in bboxes.itertuples():
-        draw.rectangle(
-            xy=(row.x1, row.y1, row.x2, row.y2), outline=(0, 255, 0), width=2
-        )
-    return image
 
 
 

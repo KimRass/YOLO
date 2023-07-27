@@ -3,6 +3,18 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
+def draw_bboxes(image, bboxes):
+    copied = image.copy()
+    draw = ImageDraw.Draw(copied)
+    for row in bboxes.itertuples():
+        draw.rectangle(
+            xy=(row.x1, row.y1, row.x2, row.y2), outline=(0, 255, 0), width=2
+        )
+    return copied
+
+
+
+
 def load_image(img_path):
     img_path = str(img_path)
     img = cv2.imread(img_path, flags=cv2.IMREAD_COLOR)
@@ -62,20 +74,20 @@ def _batched_tensor_to_array(image, idx=0, mean=(0.485, 0.456, 0.406), std=(0.22
     return img
 
 
-def draw_bboxes(image, bboxes, idx):
-    img = _batched_tensor_to_array(image=image, idx=idx)
-    canvas = _to_pil(img)
-    draw = ImageDraw.Draw(canvas)
+# def draw_bboxes(image, bboxes, idx):
+#     img = _batched_tensor_to_array(image=image, idx=idx)
+#     canvas = _to_pil(img)
+#     draw = ImageDraw.Draw(canvas)
 
-    for x, y, w, h, c in bboxes.values:
-        draw.rectangle(
-            xy=(x - w // 2, y - h // 2, x + w // 2, y + h // 2),
-            outline=(0, 0, 0),
-            fill=None,
-            width=int(c * 5)
-        )
-    canvas = _to_array(canvas)
-    return canvas
+#     for x, y, w, h, c in bboxes.values:
+#         draw.rectangle(
+#             xy=(x - w // 2, y - h // 2, x + w // 2, y + h // 2),
+#             outline=(0, 0, 0),
+#             fill=None,
+#             width=int(c * 5)
+#         )
+#     canvas = _to_array(canvas)
+#     return canvas
 
 
 def resize_image(img, w, h):
