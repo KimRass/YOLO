@@ -160,7 +160,7 @@ class VOC2012Dataset(Dataset):
         self.transform = transform
 
     # "We introduce random scaling and translations of up to 20% of the original image size."
-    def _randomly_scale(image, bboxes, ratio=RATIO):
+    def _randomly_scale(self, image, bboxes, ratio=RATIO):
         w, h = image.size
         scale = random.uniform(1 - ratio, 1 + ratio)
         image = TF.resize(image, size=(round(h * scale), round(w * scale)), antialias=True)
@@ -171,7 +171,7 @@ class VOC2012Dataset(Dataset):
         bboxes["y2"] = bboxes["y2"].apply(lambda x: round(x * scale))
         return image, bboxes
 
-    def _randomly_shift_and_resize(image, ori_w, ori_h, ratio=RATIO):
+    def _randomly_shift_and_resize(self, image, ori_w, ori_h, ratio=RATIO):
         # We also randomly adjust the exposure and saturation of the image by up to a factor of 1:5 in the HSV color space."
         dx = round(ori_w * random.uniform(-ratio, ratio))
         dy = round(ori_h * random.uniform(-ratio, ratio))
@@ -194,8 +194,8 @@ class VOC2012Dataset(Dataset):
         for _ in range(10):
             image, bboxes = parse_xml_file(xml_path)
             ori_w, ori_h = image.size
-            image, bboxes = _randomly_scale(image=image, bboxes=bboxes)
-            image = _randomly_shift_and_resize(image, ori_w=ori_w, ori_h=ori_h)
+            image, bboxes = self._randomly_scale(image=image, bboxes=bboxes)
+            image = self._randomly_shift_and_resize(image, ori_w=ori_w, ori_h=ori_h)
             image.show()
 
 
