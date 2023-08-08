@@ -213,3 +213,22 @@ if __name__ == "__main__":
         darknet = Darknet()
         yolo = YOLO(darknet=darknet, n_classes=20)
         pred = yolo(image)
+
+
+def _randomly_adjust_brightness_and_saturation(image): # Exposure
+    h, s, v = cv2.split(np.array(image.convert("HSV")))
+    # v_scale = random.uniform(0.5, 1.5)
+    v_scale = 1.5
+    s_scale = random.uniform(0.5, 1.5)
+    v = np.clip((v * v_scale), 0, 255).astype("uint8")
+    # s = np.clip((s * s_scale), 0, 255).astype("uint8")
+    new_image = Image.fromarray(cv2.merge([h, s, v]), mode="HSV")
+    new_image.show()
+    return new_image
+
+
+
+
+image = Image.open("/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/JPEGImages/2007_000346.jpg").convert("RGB")
+new_image = T.ColorJitter((1.5, 1.5))(image)
+new_image.show()
