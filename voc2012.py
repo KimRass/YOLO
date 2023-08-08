@@ -172,7 +172,6 @@ class VOC2012Dataset(Dataset):
         return image, bboxes
 
     def _randomly_shift_and_resize(self, image, ori_w, ori_h, ratio=RATIO):
-        # We also randomly adjust the exposure and saturation of the image by up to a factor of 1:5 in the HSV color space."
         dx = round(ori_w * random.uniform(-ratio, ratio))
         dy = round(ori_h * random.uniform(-ratio, ratio))
         w, h = image.size
@@ -183,6 +182,14 @@ class VOC2012Dataset(Dataset):
             IMG_SIZE - h - (IMG_SIZE - h) // 2 - dy,
         )
         image = TF.pad(image, padding=padding, padding_mode="edge")
+        return image
+
+    def _randomly_adjust_b_and_s(self, image):
+        # We also randomly adjust the exposure and saturation of the image by up to a factor of 1.5
+        # in the HSV color space."
+        # Exposure is same as brightness in HSV color space.
+        image = TF.adjust_brightness(image, random.uniform(0.5, 1.5))
+        image = TF.adjust_saturation(image, random.uniform(0.5, 1.5))
         return image
 
     def __len__(self):
@@ -196,6 +203,7 @@ class VOC2012Dataset(Dataset):
             ori_w, ori_h = image.size
             image, bboxes = self._randomly_scale(image=image, bboxes=bboxes)
             image = self._randomly_shift_and_resize(image, ori_w=ori_w, ori_h=ori_h)
+            image = self._randomly_adjust_b_and_s(image)
             image.show()
 
 
@@ -215,20 +223,6 @@ if __name__ == "__main__":
         pred = yolo(image)
 
 
-def _randomly_adjust_brightness_and_saturation(image): # Exposure
-    h, s, v = cv2.split(np.array(image.convert("HSV")))
-    # v_scale = random.uniform(0.5, 1.5)
-    v_scale = 1.5
-    s_scale = random.uniform(0.5, 1.5)
-    v = np.clip((v * v_scale), 0, 255).astype("uint8")
-    # s = np.clip((s * s_scale), 0, 255).astype("uint8")
-    new_image = Image.fromarray(cv2.merge([h, s, v]), mode="HSV")
-    new_image.show()
-    return new_image
 
 
-
-
-image = Image.open("/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/JPEGImages/2007_000346.jpg").convert("RGB")
-new_image = T.ColorJitter((1.5, 1.5))(image)
-new_image.show()
+    image = Image.open("/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/JPEGImages/2007_000346.jpg").convert("RGB")
