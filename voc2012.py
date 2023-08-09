@@ -15,14 +15,7 @@ import torchvision.transforms.functional as TF
 import random
 
 import config
-from utils import (
-    _to_array,
-    _to_pil,
-    load_image,
-    _get_width_and_height,
-    show_image,
-    draw_bboxes,
-)
+from utils import draw_bboxes, get_image_dataset_mean_and_std
 
 VOC_CLASSES = [
     "background",
@@ -48,11 +41,9 @@ VOC_CLASSES = [
     "tvmonitor"
 ]
 IMG_SIZE = 448
-TRANSFORM_RATIO = 0.2
 N_CELLS = 7
 CELL_SIZE = IMG_SIZE // N_CELLS
-
-# "To avoid overfitting we use dropout and extensive data augmentation. A dropout layer with rate = .5 after the first connected layer prevents co-adaptation between layers [18]. For data augmentation we introduce random scaling and translations of up to 20% of the original image size. We also randomly adjust the exposure and saturation of the image by up to a factor of 1:5 in the HSV color space. 2.3. Inference Just like in training, predicting"
+TRANSFORM_RATIO = 0.2
 
 
 def parse_xml_file(xml_path):
@@ -72,21 +63,6 @@ def parse_xml_file(xml_path):
     img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
     image = Image.open(img_path).convert("RGB")
     return image, bboxes
-
-
-# class Transform(object):
-#     def __call__(self, image):
-#         h, w = image.size
-#         transform = T.Compose(
-#             [
-#                 T.ToTensor(),
-#                 T.CenterCrop(max(h, w)),
-#                 T.Resize(IMG_SIZE, antialias=True),
-#                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-#             ]
-#         )
-#         x = transform(image)
-#         return x
 
 
 class VOC2012Dataset(Dataset):
@@ -126,6 +102,10 @@ class VOC2012Dataset(Dataset):
         bboxes["y1"] += dy
         bboxes["x2"] += dx
         bboxes["y2"] += dy
+
+        w, h = image.size
+        bboxes[["x1", "x2"]] = bboxes[["x1", "x2"]].clip(0, w)
+        bboxes[["y1", "y2"]] = bboxes[["y1", "y2"]].clip(0, h)
         return image, bboxes
 
     def _randomly_adjust_b_and_s(self, image):
@@ -162,7 +142,6 @@ class VOC2012Dataset(Dataset):
         bboxes["y_grid"] = bboxes.apply(
             lambda x: int((x["y1"] + x["y2"]) / 2 / CELL_SIZE), axis=1
         )
-        bboxes
 
         gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float64)
         for row in bboxes.itertuples():
@@ -179,16 +158,14 @@ class VOC2012Dataset(Dataset):
 
     def __getitem__(self, idx):
         xml_path = self.annots[idx]
-        # xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000032.xml"
-        # for _ in range(10):
         image, bboxes = parse_xml_file(xml_path)
         ori_w, ori_h = image.size
 
         image, bboxes = self._randomly_flip_horizontally(image=image, bboxes=bboxes)
-        image, bboxes = self._randomly_scale(image=image, bboxes=bboxes)
         image, bboxes = self._randomly_shift(
             image=image, bboxes=bboxes, ori_w=ori_w, ori_h=ori_h
         )
+        image, bboxes = self._randomly_scale(image=image, bboxes=bboxes)
         image = self._randomly_adjust_b_and_s(image)
         image, bboxes = self._crop_center(image=image, bboxes=bboxes)
 
@@ -196,6 +173,8 @@ class VOC2012Dataset(Dataset):
         bboxes = bboxes[(bboxes["x1"] != bboxes["x2"]) & (bboxes["y1"] != bboxes["y2"])]
         return image, bboxes
 
+        # get_image_dataset_mean_and_std
+        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
         # gt = self._encode(bboxes)
         # return image, gt
 
@@ -204,20 +183,7 @@ if __name__ == "__main__":
     # transform = Transform()
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
     # parse_xml_file(ds.annots[0])[1]
-    image, bboxes = ds[0]
-
-    draw = ImageDraw.Draw(image)
-    for row in bboxes.itertuples():
-        draw.rectangle(
-            xy=(row.x1, row.y1, row.x2, row.y2),
-            outline="rgb(255, 0, 0)",
-            fill=None,
-            width=2
-        )
-        draw.line(xy=(row.x1, row.y1, row.x2, row.y2), fill="rgb(255, 0, 0)", width=1)
-        draw.line(xy=(row.x1, row.y2, row.x2, row.y1), fill="rgb(255, 0, 0)", width=1)
-    for i in range(1, N_CELLS):
-        val = CELL_SIZE * i
-        draw.line(xy=(val, 0, val, IMG_SIZE), fill="rgb(0, 255, 0)", width=1)
-        draw.line(xy=(0, val, IMG_SIZE, val), fill="rgb(0, 255, 0)", width=1)
-    image.show()
+    image, bboxes = ds[10]
+    # (500, 375)
+    vis = draw_bboxes(image=image, bboxes=bboxes, grids=True)
+    vis.show()
