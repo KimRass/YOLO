@@ -19,4 +19,5 @@ model = YOLO(n_classes=N_CLASSES)
 
 image, gt = next(iter(dl))
 pred = model(image)
+pred.shape
 gt.shape, pred.shape

@@ -127,6 +127,8 @@ class VOC2012Dataset(Dataset):
         return image, bboxes
 
     def _encode(self, bboxes):
+        # "We parametrize the bounding box x and y coordinates to be offsets
+        # of a particular grid cell location so they are also bounded between 0 and 1."
         bboxes["x"] = bboxes.apply(
             lambda x: (((x["x1"] + x["x2"]) / 2) % CELL_SIZE) / CELL_SIZE,
             axis=1
@@ -135,6 +137,8 @@ class VOC2012Dataset(Dataset):
             lambda x: (((x["y1"] + x["y2"]) / 2) % CELL_SIZE) / CELL_SIZE,
             axis=1
         )
+        # "We normalize the bounding box width and height by the image width and height
+        # so that they fall between 0 and 1."
         bboxes["w"] = bboxes.apply(lambda x: (x["x2"] - x["x1"]) / IMG_SIZE, axis=1)
         bboxes["h"] = bboxes.apply(lambda x: (x["y2"] - x["y1"]) / IMG_SIZE, axis=1)
 
@@ -145,14 +149,21 @@ class VOC2012Dataset(Dataset):
             lambda x: int((x["y1"] + x["y2"]) / 2 / CELL_SIZE), axis=1
         )
 
-        gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float)
+        # gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float)
+        gt = torch.zeros((30, N_CELLS, N_CELLS), dtype=torch.float)
         for row in bboxes.itertuples():
             gt[0, row.y_grid, row.x_grid] = row.x
             gt[1, row.y_grid, row.x_grid] = row.y
             gt[2, row.y_grid, row.x_grid] = row.w
             gt[3, row.y_grid, row.x_grid] = row.h
             gt[4, row.y_grid, row.x_grid] = 1
-            gt[5 + row.cls, row.y_grid, row.x_grid] = 1
+            gt[5, row.y_grid, row.x_grid] = row.x
+            gt[6, row.y_grid, row.x_grid] = row.y
+            gt[7, row.y_grid, row.x_grid] = row.w
+            gt[8, row.y_grid, row.x_grid] = row.h
+            gt[9, row.y_grid, row.x_grid] = 1
+            # gt[5 + row.cls, row.y_grid, row.x_grid] = 1
+            gt[10 + row.cls, row.y_grid, row.x_grid] = 1
         return gt
 
     def __len__(self):

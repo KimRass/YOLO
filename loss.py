@@ -1,6 +1,5 @@
 # References
     # https://github.com/motokimura/yolo_v1_pytorch/blob/master/loss.py
-    # https://www.harrysprojects.com/articles/yolov1.html
 
 # For all predicted boxes that are not matched with a ground truth box, it is minimising the objectness confidence, but ignoring the box coordinates and class probabilities.
 
@@ -17,6 +16,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from PIL import Image
+from einops import rearrange
 
 from model import Darknet, YOLO
 from voc2012 import Transform, VOC2012Dataset
@@ -46,15 +46,70 @@ class Yolov1Loss(nn.Module):
         lamb_noobj=0.5
         n_bboxes=2
         n_classes=20
-        gt = torch.randn((2, 30, 7, 7))
-        pred = torch.randn((2, 30, 7, 7))
+        n_channels = 5 * n_bboxes + n_classes
         
-        obj_mask, noobj_mask = get_masks(gt)
-        (pred * obj_mask).shape
-        pred[obj_mask].shape
-        pred[noobj_mask].shape
+        mse = nn.MSELoss(reduction="sum")
 
+        pred = torch.randn(2, 30, 7, 7)
+        pred = pred.clip(0, 1)
+        # pred.shape, gt.shape
+        b, _, _, _ = pred.shape
+        
+        # pred = rearrange(pred, pattern="b c h w -> b (h w) c")
+        # gt = rearrange(gt, pattern="b c h w -> b (h w) c")
+        pred = pred.permute(0, 2, 3, 1)
+        gt = gt.permute(0, 2, 3, 1)
+        
+        obj_mask = (gt[..., 4] == 1)
+        obj_indices = obj_mask.nonzero(as_tuple=True)
+        noobj_mask = (gt[..., 4] != 1)
+        noobj_indices = noobj_mask.nonzero(as_tuple=True)
+        
+        ### Confidence loss
+        obj_pred_conf = pred[..., (4, 9)][obj_indices]
+        # $$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{i})^{2}$$
+        obj_conf_loss = mse(obj_pred_conf, torch.ones_like(obj_pred_conf))
+        
+        noobj_pred_conf = pred[..., (4, 9)][noobj_indices]
+        noobj_conf_loss = lamb_noobj * mse(noobj_pred_conf, torch.zeros_like(noobj_pred_conf))
 
+        conf_loss = obj_conf_loss + noobj_conf_loss
+
+        # Localization loss
+        IMG_SIZE = 448
+        N_CELLS = 7
+        CELL_SIZE = IMG_SIZE // N_CELLS
+
+        for k, i, j in zip(*obj_indices):
+            x_, y_, w_, h_ = gt[k, i, j, : 4]
+            x = CELL_SIZE * j + w_ * CELL_SIZE
+            y = CELL_SIZE * i + h_ * CELL_SIZE
+            w = w_ * IMG_SIZE
+            h = h_ * IMG_SIZE
+            x1 = x - w
+            y1 = y - h
+            x2 = x + w
+            y2 = y + h
+            gt_bbox = torch.Tensor([[x1, y1, x2, y2]])
+            coord_mask = torch.zeros(size=(b, N_CELLS, N_CELLS, 2))
+            for l in range(n_bboxes):
+                pred_bboxes = pred[k, ..., l: l + 4].clone()
+                pred_bboxes[..., 0] *= CELL_SIZE
+                pred_bboxes[..., 1] *= CELL_SIZE
+                pred_bboxes[..., 0] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(0)
+                pred_bboxes[..., 1] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(1)
+                pred_bboxes[..., 2] *= IMG_SIZE
+                pred_bboxes[..., 3] *= IMG_SIZE
+                pred_bboxes = pred_bboxes.view(-1, 4)
+                
+                ious = box_iou(gt_bbox, pred_bboxes)
+                conf, argmax = torch.max(ious, dim=1)
+                idx = (argmax // N_CELLS, argmax % N_CELLS)
+                coord_mask[k, idx[0], idx[1], l] = 1
+            coord_mask
+            
+            
+        
 
 
 
