@@ -20,8 +20,8 @@ def draw_bboxes(image: Image.Image, bboxes: pd.DataFrame, grids: bool) -> None:
 
     if grids:
         for i in range(1, N_CELLS): # Draw grids
-            draw.line(xy=(CELL_SIZE * i, 0, CELL_SIZE * i, IMG_SIZE), fill="rgb(0, 175, 0)", width=1)
-            draw.line(xy=(0, CELL_SIZE * i, IMG_SIZE, CELL_SIZE * i), fill="rgb(0, 175, 0)", width=1)
+            draw.line(xy=(CELL_SIZE * i, 0, CELL_SIZE * i, IMG_SIZE), fill="rgb(150, 150, 150)", width=1)
+            draw.line(xy=(0, CELL_SIZE * i, IMG_SIZE, CELL_SIZE * i), fill="rgb(150, 150, 150)", width=1)
 
     for row in bboxes.itertuples(): # Draw bboxes
         draw.rectangle(

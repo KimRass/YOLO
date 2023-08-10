@@ -5,10 +5,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation between layers"
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, groups=1, bias=True):
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0, groups=1, bias=True
+    ):
         super().__init__()
 
         self.conv = nn.Conv2d(
@@ -79,10 +80,10 @@ class Darknet(nn.Module):
 
 
 class YOLO(nn.Module):
-    def __init__(self, darknet, n_classes, n_grids=7, n_bboxes=2):
+    def __init__(self, n_classes, n_grids=7, n_bboxes=2):
         super().__init__()
 
-        self.darknet = darknet
+        self.darknet = Darknet()
         self.n_classes = n_classes
         self.n_grids = n_grids
         self.n_bboxes = n_bboxes
@@ -96,6 +97,8 @@ class YOLO(nn.Module):
         self.linear1 = nn.Linear(1024 * n_grids * n_grids, 4096)
         self.linear2 = nn.Linear(4096, n_grids * n_grids * (5 * n_bboxes + n_classes))
 
+        # "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation
+        # between layers"
         self.dropout = nn.Dropout(0.5)
 
         self.leakyrelu = nn.LeakyReLU(0.1)
@@ -127,7 +130,6 @@ class YOLO(nn.Module):
 
 
 if __name__ == "__main__":
-    darknet = Darknet()
-    yolo = YOLO(darknet=darknet, n_classes=20)
+    yolo = YOLO(n_classes=21)
     x = torch.randn((4, 3, 448, 448))
     yolo(x).shape

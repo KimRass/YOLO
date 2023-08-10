@@ -117,7 +117,9 @@ class VOC2012Dataset(Dataset):
 
     def _crop_center(self, image, bboxes):
         w, h = image.size
+
         image = TF.center_crop(image, output_size=IMG_SIZE)
+
         bboxes["x1"] += (IMG_SIZE - w) // 2
         bboxes["y1"] += (IMG_SIZE - h) // 2
         bboxes["x2"] += (IMG_SIZE - w) // 2
@@ -143,7 +145,7 @@ class VOC2012Dataset(Dataset):
             lambda x: int((x["y1"] + x["y2"]) / 2 / CELL_SIZE), axis=1
         )
 
-        gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float64)
+        gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float)
         for row in bboxes.itertuples():
             gt[0, row.y_grid, row.x_grid] = row.x
             gt[1, row.y_grid, row.x_grid] = row.y
@@ -171,19 +173,18 @@ class VOC2012Dataset(Dataset):
 
         bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]].clip(0, IMG_SIZE)
         bboxes = bboxes[(bboxes["x1"] != bboxes["x2"]) & (bboxes["y1"] != bboxes["y2"])]
-        return image, bboxes
+        # return image, bboxes
 
         # get_image_dataset_mean_and_std
-        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
-        # gt = self._encode(bboxes)
-        # return image, gt
+        image = TF.to_tensor(image)
+        image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
+        gt = self._encode(bboxes)
+        return image, gt
 
 
 if __name__ == "__main__":
-    # transform = Transform()
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    # parse_xml_file(ds.annots[0])[1]
-    image, bboxes = ds[10]
-    # (500, 375)
-    vis = draw_bboxes(image=image, bboxes=bboxes, grids=True)
-    vis.show()
+    image, gt = ds[10]
+    gt[0]
+    # vis = draw_bboxes(image=image, bboxes=bboxes, grids=True)
+    # vis.show()
