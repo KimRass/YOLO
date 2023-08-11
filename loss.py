@@ -25,38 +25,72 @@ from image_utils import resize_image
 np.set_printoptions(precision=3, suppress=True)
 
 
-def get_masks(gt):
-    obj_mask = gt[:, 4, :, :] > 0
-    obj_mask = obj_mask.unsqueeze(1).expand_as(gt)
-    noobj_mask = torch.logical_not(obj_mask)
-    return obj_mask, noobj_mask
+# def get_masks(gt):
+#     obj_mask = gt[:, 4, :, :] > 0
+#     obj_mask = obj_mask.unsqueeze(1).expand_as(gt)
+#     noobj_mask = torch.logical_not(obj_mask)
+#     return obj_mask, noobj_mask
+
+N_BBOXES = 2
+IMG_SIZE = 448
+N_CELLS = 7
+CELL_SIZE = IMG_SIZE // N_CELLS
+
+
+def get_gt_bbox(gt, batch_idx, y_idx, x_idx):
+    x_, y_, w_, h_ = gt[batch_idx, : 4, y_idx, x_idx]
+    x = CELL_SIZE * x_idx + x_ * CELL_SIZE
+    y = CELL_SIZE * y_idx + y_ * CELL_SIZE
+    w = w_ * IMG_SIZE
+    h = h_ * IMG_SIZE
+
+    x1 = x - w
+    y1 = y - h
+    x2 = x + w
+    y2 = y + h
+    gt_bbox = torch.Tensor([[x1, y1, x2, y2]])
+    return gt_bbox
+
+
+def decode(pred):
+    bboxes = pred.clone()
+
+    # bboxes = bboxes[:, (0, 1, 2, 3, 5, 6, 7, 8), ...]
+    bboxes = bboxes[:, : 10, ...]
+    # bboxes = bboxes.view(-1, N_BBOXES, 4, N_CELLS, N_CELLS)
+    bboxes = bboxes.view(-1, N_BBOXES, 5, N_CELLS, N_CELLS)
+    bboxes = bboxes.permute(0, 1, 3, 4, 2)
+
+    bboxes[..., 2] *= IMG_SIZE # w
+    bboxes[..., 3] *= IMG_SIZE # h
+
+    bboxes[..., 0] *= CELL_SIZE # x
+    bboxes[..., 0] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(0)
+    bboxes[..., 1] *= CELL_SIZE # y
+    bboxes[..., 1] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(1)
+
+    x1 = bboxes[..., 0] - bboxes[..., 2] / 2
+    y1 = bboxes[..., 1] - bboxes[..., 3] / 2
+    x2 = bboxes[..., 0] + bboxes[..., 2] / 2
+    y2 = bboxes[..., 1] + bboxes[..., 3] / 2
+    conf = bboxes[..., 4]
+    # bboxes = torch.stack([x1, y1, x2, y2], dim=4)
+    bboxes = torch.stack([x1, y1, x2, y2, conf], dim=4)
+    
+    bboxes = rearrange(bboxes, pattern="b c h w k -> b (c h w) k")
+    return bboxes
 
 
 class Yolov1Loss(nn.Module):
-    def __init__(self, lamb_coord=5, lamb_noobj=0.5, n_bboxes=2, n_classes=20):
+    def __init__(self, lamb_coord=5, lamb_noobj=0.5, N_BBOXES=2, n_classes=20):
         super().__init__()
 
         self.lamb_coord = lamb_coord
         self.lamb_noobj = lamb_noobj
-        self.n_bboxes = n_bboxes
+        self.N_BBOXES = N_BBOXES
         self.n_classes = n_classes
-    
-    def forward(self, gt, pred):
-        lamb_coord=5
-        lamb_noobj=0.5
-        n_bboxes=2
-        n_classes=20
-        n_channels = 5 * n_bboxes + n_classes
-        
-        mse = nn.MSELoss(reduction="sum")
 
-        pred = torch.randn(2, 30, 7, 7)
-        pred = pred.clip(0, 1)
-        # pred.shape, gt.shape
-        b, _, _, _ = pred.shape
-        
-        # pred = rearrange(pred, pattern="b c h w -> b (h w) c")
-        # gt = rearrange(gt, pattern="b c h w -> b (h w) c")
+    def _get_confidence_loss(pred, gt):
         pred = pred.permute(0, 2, 3, 1)
         gt = gt.permute(0, 2, 3, 1)
         
@@ -74,55 +108,75 @@ class Yolov1Loss(nn.Module):
         noobj_conf_loss = lamb_noobj * mse(noobj_pred_conf, torch.zeros_like(noobj_pred_conf))
 
         conf_loss = obj_conf_loss + noobj_conf_loss
+        return conf_loss
+    
+    def forward(self, gt, pred):
+        lamb_coord=5
+        lamb_noobj=0.5
+        n_classes=20
+        n_channels = 5 * N_BBOXES + n_classes
+        
+        mse = nn.MSELoss(reduction="sum")
+
 
         # Localization loss
         IMG_SIZE = 448
         N_CELLS = 7
         CELL_SIZE = IMG_SIZE // N_CELLS
 
-        for k, i, j in zip(*obj_indices):
-            x_, y_, w_, h_ = gt[k, i, j, : 4]
-            x = CELL_SIZE * j + w_ * CELL_SIZE
-            y = CELL_SIZE * i + h_ * CELL_SIZE
-            w = w_ * IMG_SIZE
-            h = h_ * IMG_SIZE
-            x1 = x - w
-            y1 = y - h
-            x2 = x + w
-            y2 = y + h
-            gt_bbox = torch.Tensor([[x1, y1, x2, y2]])
-            coord_mask = torch.zeros(size=(b, N_CELLS, N_CELLS, 2))
-            for l in range(n_bboxes):
-                pred_bboxes = pred[k, ..., l: l + 4].clone()
-                pred_bboxes[..., 0] *= CELL_SIZE
-                pred_bboxes[..., 1] *= CELL_SIZE
-                pred_bboxes[..., 0] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(0)
-                pred_bboxes[..., 1] += torch.linspace(0, IMG_SIZE - CELL_SIZE, N_CELLS).unsqueeze(1)
-                pred_bboxes[..., 2] *= IMG_SIZE
-                pred_bboxes[..., 3] *= IMG_SIZE
-                pred_bboxes = pred_bboxes.view(-1, 4)
-                
-                ious = box_iou(gt_bbox, pred_bboxes)
-                conf, argmax = torch.max(ious, dim=1)
-                idx = (argmax // N_CELLS, argmax % N_CELLS)
-                coord_mask[k, idx[0], idx[1], l] = 1
-            coord_mask
+        pred = torch.randn(2, 30, 7, 7)
+        pred = pred.clip(0, 1)
+
+        b, _, _, _ = pred.shape
+        batched_pred_bboxes = decode(pred)
+        batched_gt_bboxes = decode(gt)
+        for i in range(b):
+            pred_bboxes = batched_pred_bboxes[i]
+            gt_bboxes = batched_gt_bboxes[i]
+            gt_bboxes = torch.unique(gt_bboxes[gt_bboxes[:, 4] == 1], dim=0)
+            gt_bboxes
+            pred_bboxes.shape
             
+            iou = box_iou(pred_bboxes[:, : 4], gt_bboxes[:, : 4])
+            iou.shape
+            max_iou, argmax = torch.max(iou, dim=0)
+            max_iou, argmax
+            iou.shape
+
+
+        # pred.shape, gt.shape
+        # obj_mask = (gt[:, 4, ...] == 1)
+        # obj_indices = obj_mask.nonzero(as_tuple=True)
+        # # noobj_mask = (gt[:, 4, ...] != 1)
+        # # noobj_indices = noobj_mask.nonzero(as_tuple=True)
+        # b, _, _, _ = pred.shape
+
+        # mask = torch.zeros(size=(b, N_CELLS ** 2 * N_BBOXES))
+        # for batch_idx, y_idx, x_idx in zip(*obj_indices):
+        #     gt_bbox = get_gt_bbox(gt=gt, batch_idx=batch_idx, y_idx=y_idx, x_idx=x_idx)
+        #     pred_bboxes = batched_pred_bboxes[batch_idx, :, :]
+
+        #     ious = box_iou(gt_bbox, pred_bboxes)
+        #     max_iou, argmax = torch.max(ious, dim=1)
+
+        #     mask[batch_idx, argmax] = 1
+        # pred
+        # batched_pred_bboxes.shape
+        # gt.shape
             
-        
 
 
 
 
 
 
-def tensor_to_array(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
-    img = image.clone()[0].permute((1, 2, 0)).detach().cpu().numpy()
-    img *= std
-    img += mean
-    img *= 255.0
-    img = np.clip(img, 0, 255).astype("uint8")
-    return img
+# def tensor_to_array(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+#     img = image.clone()[0].permute((1, 2, 0)).detach().cpu().numpy()
+#     img *= std
+#     img += mean
+#     img *= 255.0
+#     img = np.clip(img, 0, 255).astype("uint8")
+#     return img
 
 
 def get_whether_each_predictor_is_responsible(gt, pred):
@@ -149,7 +203,7 @@ def get_whether_each_predictor_is_responsible(gt, pred):
     is_resp = F.one_hot(argmax, num_classes=2).permute(0, 3, 1, 2).float()
     is_resp[:, 0, ...] *= gt[:, 4, ...]
     is_resp[:, 1, ...] *= gt[:, 9, ...]
-    # is_resp = torch.concat([onehot[:, k: k + 1, ...].repeat(1, 5, 1, 1) for k in range(n_bboxes)], dim=1)
+    # is_resp = torch.concat([onehot[:, k: k + 1, ...].repeat(1, 5, 1, 1) for k in range(N_BBOXES)], dim=1)
     # is_resp.shape
     return is_resp
 
@@ -160,12 +214,12 @@ def get_whether_object_appear_in_each_cell(is_resp):
 
 
 class Yolov1Loss(nn.Module):
-    def __init__(self, lamb_coord=5, lamb_noobj=0.5, n_bboxes=2, n_classes=20):
+    def __init__(self, lamb_coord=5, lamb_noobj=0.5, N_BBOXES=2, n_classes=20):
         super().__init__()
 
         self.lamb_coord = lamb_coord
         self.lamb_noobj = lamb_noobj
-        self.n_bboxes = n_bboxes
+        self.N_BBOXES = N_BBOXES
         self.n_classes = n_classes
     
     def forward(self, gt, pred):
@@ -180,11 +234,11 @@ class Yolov1Loss(nn.Module):
         # Localization loss
         # x, y
         xy_sse = F.mse_loss(gt[:, (0, 1, 5, 6), ...], pred[:, (0, 1, 5, 6), ...], reduction="none")
-        xy_sse *= torch.concat([is_resp[:, k: k + 1, ...].repeat(1, 2, 1, 1) for k in range(self.n_bboxes)], dim=1)
+        xy_sse *= torch.concat([is_resp[:, k: k + 1, ...].repeat(1, 2, 1, 1) for k in range(self.N_BBOXES)], dim=1)
         xy_sse *= self.lamb_coord
         # w, h
         wh_sse = F.mse_loss(gt[:, (2, 3, 7, 8), ...] ** 0.5, pred[:, (2, 3, 7, 8), ...] ** 0.5, reduction="none")
-        wh_sse *= torch.concat([is_resp[:, k: k + 1, ...].repeat(1, 2, 1, 1) for k in range(self.n_bboxes)], dim=1)
+        wh_sse *= torch.concat([is_resp[:, k: k + 1, ...].repeat(1, 2, 1, 1) for k in range(self.N_BBOXES)], dim=1)
         wh_sse *= self.lamb_coord
         loc_loss = xy_sse.sum() + wh_sse.sum()
 
