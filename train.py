@@ -82,8 +82,12 @@ if N_GPUS > 0:
 else:
     print("Using CPU.")
 
-# optim = SGD(model.parameters(), lr=config.INIT_LR, momentum=config.MOMENTUM, weight_decay=config.WEIGHT_DECAY)
-optim = SGD(model.parameters(), momentum=config.MOMENTUM, weight_decay=config.WEIGHT_DECAY)
+optim = SGD(
+    model.parameters(),
+    lr=config.INIT_LR,
+    momentum=config.MOMENTUM,
+    weight_decay=config.WEIGHT_DECAY
+)
 
 scaler = GradScaler()
 
@@ -98,7 +102,7 @@ for epoch in range(1, config.N_EPOCHS + 1):
         image = image.to(DEVICE)
         gt = gt.to(DEVICE)
 
-        lr = get_lr(step=step, lr=config.INIT_LR, ds_size=ds_size, batch_size=config.BATCH_SIZE)
+        lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
         update_lr(lr=lr, optim=optim)
 
         optim.zero_grad()
