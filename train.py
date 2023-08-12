@@ -117,6 +117,7 @@ for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
             pred = model(image)
             loss = crit(pred=pred, gt=gt)
         running_loss += loss.item()
+        print(loss.item(), running_loss)
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
@@ -127,10 +128,11 @@ for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
             optim.step()
 
     ### Print loss.
-    print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
-    print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / len(dl):.4f} ]""")
+    if (epoch % config.N_PRINT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
+        print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
+        print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / len(dl):.4f} ]""")
 
-    running_loss = 0
+        running_loss = 0
 
     ### Save checkpoint.
     if (epoch % config.N_CKPT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
