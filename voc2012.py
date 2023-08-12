@@ -5,48 +5,16 @@
 # When testing on 2012 we also include the VOC 2007 test data for training."
 
 from pathlib import Path
-import cv2
-import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw
+from PIL import Image
 import xml.etree.ElementTree as et
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as T
+from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 import random
 
 import config
 from utils import draw_bboxes, get_image_dataset_mean_and_std
-
-VOC_CLASSES = [
-    "background",
-    "aeroplane",
-    "bicycle",
-    "bird",
-    "boat",
-    "bottle",
-    "bus",
-    "car",
-    "cat",
-    "chair",
-    "cow",
-    "diningtable",
-    "dog",
-    "horse",
-    "motorbike",
-    "person",
-    "pottedplant",
-    "sheep",
-    "sofa",
-    "train",
-    "tvmonitor"
-]
-IMG_SIZE = 448
-N_CELLS = 7
-CELL_SIZE = IMG_SIZE // N_CELLS
-TRANSFORM_RATIO = 0.2
 
 
 def parse_xml_file(xml_path):
@@ -59,7 +27,7 @@ def parse_xml_file(xml_path):
             int(bbox.find("bndbox").find("ymin").text),
             int(bbox.find("bndbox").find("xmax").text),
             int(bbox.find("bndbox").find("ymax").text),
-            VOC_CLASSES.index(xroot.find("object").find("name").text)
+            config.VOC_CLASSES.index(xroot.find("object").find("name").text)
         ) for bbox in xroot.findall("object")
     ], columns=("x1", "y1", "x2", "y2", "cls"))
 
@@ -69,12 +37,10 @@ def parse_xml_file(xml_path):
 
 
 class VOC2012Dataset(Dataset):
-    # def __init__(self, annot_dir, transform=None):
     def __init__(self, annot_dir):
         super().__init__()
 
         self.annots = list(Path(annot_dir).glob("*.xml"))
-        # self.transform = transform
 
     def _randomly_flip_horizontally(self, image, bboxes, p=0.5):
         w, _ = image.size
@@ -86,7 +52,7 @@ class VOC2012Dataset(Dataset):
     # "We introduce random scaling and translations of up to 20% of the original image size."
     def _randomly_scale(self, image, bboxes):
         w, h = image.size
-        scale = random.uniform(1 - TRANSFORM_RATIO, 1 + TRANSFORM_RATIO)
+        scale = random.uniform(1 - config.TRANSFORM_RATIO, 1 + config.TRANSFORM_RATIO)
         image = TF.resize(image, size=(round(h * scale), round(w * scale)), antialias=True)
 
         bboxes["x1"] = bboxes["x1"].apply(lambda x: round(x * scale))
@@ -96,8 +62,8 @@ class VOC2012Dataset(Dataset):
         return image, bboxes
 
     def _randomly_shift(self, image, bboxes, ori_w, ori_h):
-        dx = round(ori_w * random.uniform(-TRANSFORM_RATIO, TRANSFORM_RATIO))
-        dy = round(ori_h * random.uniform(-TRANSFORM_RATIO, TRANSFORM_RATIO))
+        dx = round(ori_w * random.uniform(-config.TRANSFORM_RATIO, config.TRANSFORM_RATIO))
+        dy = round(ori_h * random.uniform(-config.TRANSFORM_RATIO, config.TRANSFORM_RATIO))
 
         image = TF.pad(image, padding=(dx, dy, -dx, -dy), padding_mode="constant")
 
@@ -121,39 +87,38 @@ class VOC2012Dataset(Dataset):
     def _crop_center(self, image, bboxes):
         w, h = image.size
 
-        image = TF.center_crop(image, output_size=IMG_SIZE)
+        image = TF.center_crop(image, output_size=config.IMG_SIZE)
 
-        bboxes["x1"] += (IMG_SIZE - w) // 2
-        bboxes["y1"] += (IMG_SIZE - h) // 2
-        bboxes["x2"] += (IMG_SIZE - w) // 2
-        bboxes["y2"] += (IMG_SIZE - h) // 2
+        bboxes["x1"] += (config.IMG_SIZE - w) // 2
+        bboxes["y1"] += (config.IMG_SIZE - h) // 2
+        bboxes["x2"] += (config.IMG_SIZE - w) // 2
+        bboxes["y2"] += (config.IMG_SIZE - h) // 2
         return image, bboxes
 
     def _encode(self, bboxes):
         # "We parametrize the bounding box x and y coordinates to be offsets
         # of a particular grid cell location so they are also bounded between 0 and 1."
         bboxes["x"] = bboxes.apply(
-            lambda x: (((x["x1"] + x["x2"]) / 2) % CELL_SIZE) / CELL_SIZE,
+            lambda x: (((x["x1"] + x["x2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
             axis=1
         )
         bboxes["y"] = bboxes.apply(
-            lambda x: (((x["y1"] + x["y2"]) / 2) % CELL_SIZE) / CELL_SIZE,
+            lambda x: (((x["y1"] + x["y2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
             axis=1
         )
         # "We normalize the bounding box width and height by the image width and height
         # so that they fall between 0 and 1."
-        bboxes["w"] = bboxes.apply(lambda x: (x["x2"] - x["x1"]) / IMG_SIZE, axis=1)
-        bboxes["h"] = bboxes.apply(lambda x: (x["y2"] - x["y1"]) / IMG_SIZE, axis=1)
+        bboxes["w"] = bboxes.apply(lambda x: (x["x2"] - x["x1"]) / config.IMG_SIZE, axis=1)
+        bboxes["h"] = bboxes.apply(lambda x: (x["y2"] - x["y1"]) / config.IMG_SIZE, axis=1)
 
         bboxes["x_grid"] = bboxes.apply(
-            lambda x: int((x["x1"] + x["x2"]) / 2 / CELL_SIZE), axis=1
+            lambda x: int((x["x1"] + x["x2"]) / 2 / config.CELL_SIZE), axis=1
         )
         bboxes["y_grid"] = bboxes.apply(
-            lambda x: int((x["y1"] + x["y2"]) / 2 / CELL_SIZE), axis=1
+            lambda x: int((x["y1"] + x["y2"]) / 2 / config.CELL_SIZE), axis=1
         )
 
-        # gt = torch.zeros((25, N_CELLS, N_CELLS), dtype=torch.float)
-        gt = torch.zeros((30, N_CELLS, N_CELLS), dtype=torch.float)
+        gt = torch.zeros((30, config.N_CELLS, config.N_CELLS), dtype=torch.float)
         for row in bboxes.itertuples():
             gt[0, row.y_grid, row.x_grid] = row.x
             gt[1, row.y_grid, row.x_grid] = row.y
@@ -165,7 +130,6 @@ class VOC2012Dataset(Dataset):
             gt[7, row.y_grid, row.x_grid] = row.w
             gt[8, row.y_grid, row.x_grid] = row.h
             gt[9, row.y_grid, row.x_grid] = 1
-            # gt[5 + row.cls, row.y_grid, row.x_grid] = 1
             gt[10 + row.cls, row.y_grid, row.x_grid] = 1
         return gt
 
@@ -185,13 +149,12 @@ class VOC2012Dataset(Dataset):
         image = self._randomly_adjust_b_and_s(image)
         image, bboxes = self._crop_center(image=image, bboxes=bboxes)
 
-        bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]].clip(0, IMG_SIZE)
+        bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]].clip(0, config.IMG_SIZE)
         bboxes = bboxes[(bboxes["x1"] != bboxes["x2"]) & (bboxes["y1"] != bboxes["y2"])]
-        # return image, bboxes
 
         # get_image_dataset_mean_and_std
         image = TF.to_tensor(image)
-        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
+        image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
         gt = self._encode(bboxes)
         return image, gt
 
