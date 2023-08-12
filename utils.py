@@ -1,8 +1,6 @@
 import torch
 import torchvision.transforms as T
-import cv2
 from PIL import Image, ImageDraw
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -145,9 +143,9 @@ def get_elapsed_time(start_time):
 #     return canvas
 
 
-def resize_image(img, w, h):
-    resized_img = cv2.resize(src=img, dsize=(w, h))
-    return resized_img
+# def resize_image(img, w, h):
+#     resized_img = cv2.resize(src=img, dsize=(w, h))
+#     return resized_img
 
 
 # def draw_bboxes(img, bboxes):

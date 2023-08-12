@@ -32,7 +32,7 @@ N_GPUS = torch.cuda.device_count()
 def get_lr(step, ds_size, batch_size):
     n_steps_per_epoch = ds_size // batch_size
     if step > 0:
-        lr = 1e-2 * (step - 1) / 266 + 1e-3 * (267 - step) / 266
+        lr = 1e-2 * (step - 1) / 266 + config.INIT_LR * (267 - step) / 266
     elif step > n_steps_per_epoch:
         lr = 1e-2
     elif step > 75 * n_steps_per_epoch:
@@ -98,7 +98,7 @@ for epoch in range(1, config.N_EPOCHS + 1):
         image = image.to(DEVICE)
         gt = gt.to(DEVICE)
 
-        lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
+        lr = get_lr(step=step, lr=config.INIT_LR, ds_size=ds_size, batch_size=config.BATCH_SIZE)
         update_lr(lr=lr, optim=optim)
 
         optim.zero_grad()
