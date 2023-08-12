@@ -10,6 +10,7 @@ from torch.cuda.amp import GradScaler
 from contextlib import nullcontext
 from time import time
 from pathlib import Path
+from tqdm.auto import tqdm
 
 import config
 from utils import get_elapsed_time
@@ -20,8 +21,8 @@ from loss import Yolov1Loss
 torch.manual_seed(config.SEED)
 
 print(f"""AUTOCAST = {config.AUTOCAST}""")
-print(f"""config.N_WORKERS = {config.N_WORKERS}""")
-print(f"""config.BATCH_SIZE = {config.BATCH_SIZE}""")
+print(f"""N_WORKERS = {config.N_WORKERS}""")
+print(f"""BATCH_SIZE = {config.BATCH_SIZE}""")
 
 
 # "For the first epochs we slowly raise the learning rate from $10^{-3}$ to $10^{-2}$.
@@ -98,7 +99,7 @@ crit = Yolov1Loss()
 ds_size = len(ds)
 n_steps_per_epoch = ds_size // config.BATCH_SIZE
 running_loss = 0
-for epoch in range(1, config.N_EPOCHS + 1):
+for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
     start_time = time()
     for step, (image, gt) in enumerate(dl, start=1):
         image = image.to(DEVICE)
