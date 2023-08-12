@@ -24,10 +24,10 @@ def parse_xml_file(xml_path):
 
     bboxes = pd.DataFrame([
         (
-            int(bbox.find("bndbox").find("xmin").text),
-            int(bbox.find("bndbox").find("ymin").text),
-            int(bbox.find("bndbox").find("xmax").text),
-            int(bbox.find("bndbox").find("ymax").text),
+            round(float(bbox.find("bndbox").find("xmin").text)),
+            round(float(bbox.find("bndbox").find("ymin").text)),
+            round(float(bbox.find("bndbox").find("xmax").text)),
+            round(float(bbox.find("bndbox").find("ymax").text)),
             config.VOC_CLASSES.index(xroot.find("object").find("name").text)
         ) for bbox in xroot.findall("object")
     ], columns=("x1", "y1", "x2", "y2", "cls"))

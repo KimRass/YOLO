@@ -1,3 +1,5 @@
+import torch
+
 ### Data
 VOC_CLASSES = [
     "aeroplane",
@@ -42,8 +44,9 @@ WEIGHT_DECAY = 0.0005
 ### Training
 SEED = 17
 N_WORKERS = 4
-MULTI_GPU = True # "We use a batch size of 64."
-BATCH_SIZE = 64
+MULTI_GPU = True
+N_GPUS = torch.cuda.device_count()
+BATCH_SIZE = 64 # "We use a batch size of 64."
 N_EPOCHS = 135 # "We train the network for about 135 epochs."
 AUTOCAST = True
 N_PRINT_STEPS = 1000

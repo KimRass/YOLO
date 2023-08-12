@@ -23,8 +23,6 @@ print(f"""AUTOCAST = {config.AUTOCAST}""")
 print(f"""config.N_WORKERS = {config.N_WORKERS}""")
 print(f"""config.BATCH_SIZE = {config.BATCH_SIZE}""")
 
-N_GPUS = torch.cuda.device_count()
-
 
 # "For the first epochs we slowly raise the learning rate from $10^{-3}$ to $10^{-2}$.
 # We continue training with $10^{-2}$ for 75 epochs, then $10^{-3}$ for 30 epochs,
@@ -55,7 +53,7 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
         "optimizer": optim.state_dict(),
         "scaler": scaler.state_dict(),
     }
-    if N_GPUS > 1 and config.MULTI_GPU:
+    if config.N_GPUS > 1 and config.MULTI_GPU:
         ckpt["model"] = model.module.state_dict()
     else:
         ckpt["model"] = model.state_dict()
@@ -74,13 +72,13 @@ dl = DataLoader(
 )
 
 model = YOLOv1(n_classes=len(config.VOC_CLASSES))
-if N_GPUS > 0:
+if config.N_GPUS > 0:
     DEVICE = torch.device("cuda")
     model = model.to(DEVICE)
-    if N_GPUS > 1 and config.MULTI_GPU:
+    if config.N_GPUS > 1 and config.MULTI_GPU:
         model = nn.DataParallel(model)
 
-        print(f"""Using {N_GPUS} GPUs.""")
+        print(f"""Using {config.N_GPUS} GPUs.""")
     else:
         print("Using single GPU.")
 else:
