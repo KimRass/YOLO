@@ -101,8 +101,9 @@ n_steps_per_epoch = ds_size // config.BATCH_SIZE
 running_loss = 0
 for epoch in range(1, config.N_EPOCHS + 1):
     start_time = time()
-    running_loss += loss.item()
-    for step, (image, gt) in enumerate(tqdm(dl), start=1):
+    running_loss = 0
+    # for step, (image, gt) in enumerate(tqdm(dl), start=1):
+    for step, (image, gt) in enumerate(dl, start=1):
         image = image.to(DEVICE)
         gt = gt.to(DEVICE)
 
