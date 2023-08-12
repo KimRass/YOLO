@@ -34,6 +34,7 @@ LAMB_COORD = 5
 LAMB_NOOBJ = 0.5
 
 ### Optimizer
+INIT_LR = 1e-3
 # "A momentum of 0.9 and a decay of 0.0005."
 MOMENTUM = 0.9
 WEIGHT_DECAY = 0.0005
