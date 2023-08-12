@@ -117,7 +117,7 @@ for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
             pred = model(image)
             loss = crit(pred=pred, gt=gt)
         running_loss += loss.item() / 100
-        print(loss.item() / 100, running_loss)
+        # print(loss.item() / 100, running_loss)
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
