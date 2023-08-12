@@ -99,7 +99,8 @@ crit = Yolov1Loss()
 ds_size = len(ds)
 n_steps_per_epoch = ds_size // config.BATCH_SIZE
 running_loss = 0
-for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
+# for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
+for epoch in range(1, config.N_EPOCHS + 1):
     start_time = time()
     running_loss = 0
     for step, (image, gt) in enumerate(dl, start=1):
@@ -129,8 +130,9 @@ for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
 
     ### Print loss.
     if (epoch % config.N_PRINT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
-        print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
-        print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / len(dl):.4f} ]""")
+        # print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
+        print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ]""", end="")
+        print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / config.N_PRINT_EPOCHS:.6f} ]""")
 
         running_loss = 0
 
