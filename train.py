@@ -20,7 +20,7 @@ from loss import Yolov1Loss
 torch.manual_seed(config.SEED)
 
 print(f"""AUTOCAST = {config.AUTOCAST}""")
-print(f"""N_WORKES = {config.N_WORKERS}""")
+print(f"""N_WORKERS = {config.N_WORKERS}""")
 print(f"""BATCH_SIZE = {config.BATCH_SIZE}""")
 
 N_GPUS = torch.cuda.device_count()
@@ -66,7 +66,9 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
 BATCH_SIZE = 2
 N_WORKERS = 0
 ds = VOC2012Dataset(annot_dir=config.ANNOT_DIR)
-dl = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=N_WORKERS, pin_memory=True, drop_last=True)
+dl = DataLoader(
+    ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=N_WORKERS, pin_memory=True, drop_last=True
+)
 
 model = YOLOv1(n_classes=len(config.VOC_CLASSES))
 if N_GPUS > 0:

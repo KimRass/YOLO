@@ -10,6 +10,7 @@ from PIL import Image
 import xml.etree.ElementTree as et
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 import torchvision.transforms.functional as TF
 import random
 
@@ -96,27 +97,28 @@ class VOC2012Dataset(Dataset):
         return image, bboxes
 
     def _encode(self, bboxes):
-        # "We parametrize the bounding box x and y coordinates to be offsets
-        # of a particular grid cell location so they are also bounded between 0 and 1."
-        bboxes["x"] = bboxes.apply(
-            lambda x: (((x["x1"] + x["x2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
-            axis=1
-        )
-        bboxes["y"] = bboxes.apply(
-            lambda x: (((x["y1"] + x["y2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
-            axis=1
-        )
-        # "We normalize the bounding box width and height by the image width and height
-        # so that they fall between 0 and 1."
-        bboxes["w"] = bboxes.apply(lambda x: (x["x2"] - x["x1"]) / config.IMG_SIZE, axis=1)
-        bboxes["h"] = bboxes.apply(lambda x: (x["y2"] - x["y1"]) / config.IMG_SIZE, axis=1)
+        if not bboxes.empty:
+            # "We parametrize the bounding box x and y coordinates to be offsets
+            # of a particular grid cell location so they are also bounded between 0 and 1."
+            bboxes["x"] = bboxes.apply(
+                lambda x: (((x["x1"] + x["x2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
+                axis=1
+            )
+            bboxes["y"] = bboxes.apply(
+                lambda x: (((x["y1"] + x["y2"]) / 2) % config.CELL_SIZE) / config.CELL_SIZE,
+                axis=1
+            )
+            # "We normalize the bounding box width and height by the image width and height
+            # so that they fall between 0 and 1."
+            bboxes["w"] = bboxes.apply(lambda x: (x["x2"] - x["x1"]) / config.IMG_SIZE, axis=1)
+            bboxes["h"] = bboxes.apply(lambda x: (x["y2"] - x["y1"]) / config.IMG_SIZE, axis=1)
 
-        bboxes["x_grid"] = bboxes.apply(
-            lambda x: int((x["x1"] + x["x2"]) / 2 / config.CELL_SIZE), axis=1
-        )
-        bboxes["y_grid"] = bboxes.apply(
-            lambda x: int((x["y1"] + x["y2"]) / 2 / config.CELL_SIZE), axis=1
-        )
+            bboxes["x_grid"] = bboxes.apply(
+                lambda x: int((x["x1"] + x["x2"]) / 2 / config.CELL_SIZE), axis=1
+            )
+            bboxes["y_grid"] = bboxes.apply(
+                lambda x: int((x["y1"] + x["y2"]) / 2 / config.CELL_SIZE), axis=1
+            )
 
         gt = torch.zeros((30, config.N_CELLS, config.N_CELLS), dtype=torch.float)
         for row in bboxes.itertuples():
@@ -161,7 +163,12 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    image, gt = ds[10]
-    gt[0]
+    # image, gt = ds[10]
     # vis = draw_bboxes(image=image, bboxes=bboxes, grids=True)
     # vis.show()
+
+    dl = DataLoader(ds, batch_size=128, num_workers=0, pin_memory=True, drop_last=True)
+    di = iter(dl)
+    from tqdm.auto import tqdm
+    for _ in tqdm(range(10000)):
+        next(di)
