@@ -101,6 +101,7 @@ n_steps_per_epoch = ds_size // config.BATCH_SIZE
 running_loss = 0
 for epoch in range(1, config.N_EPOCHS + 1):
     start_time = time()
+    running_loss += loss.item()
     for step, (image, gt) in enumerate(tqdm(dl), start=1):
         image = image.to(DEVICE)
         gt = gt.to(DEVICE)
@@ -124,22 +125,20 @@ for epoch in range(1, config.N_EPOCHS + 1):
             loss.backward()
             optim.step()
 
-        running_loss += loss.item()
+    ### Print loss.
+    print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
+    print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / len(dl):.4f} ]""")
 
-        if step % config.N_PRINT_STEPS == 0:
-            running_loss /= config.N_PRINT_STEPS
-            print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
-            print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss:.4f} ]""")
-            running_loss = 0
+    running_loss = 0
 
-        if step % config.N_CKPT_STEPS == 0:
-            save_checkpoint(
-                epoc=epoch,
-                step=step,
-                model=model,
-                optim=optim,
-                scaler=scaler,
-                save_path=Path(__file__).parent/f"""checkpoints/{step}.pth""",
-            )
-            print(f"""Saved checkpoint at epoch {epoch}/{config.N_EPOCHS}""", end="")
-            print(f""" and step {step:,}/{n_steps_per_epoch:,}.""")
+    ### Save checkpoint.
+    save_checkpoint(
+        epoc=epoch,
+        step=step,
+        model=model,
+        optim=optim,
+        scaler=scaler,
+        save_path=Path(__file__).parent/f"""checkpoints/{step}.pth""",
+    )
+    print(f"""Saved checkpoint at epoch {epoch}/{config.N_EPOCHS}""", end="")
+    print(f""" and step {step:,}/{n_steps_per_epoch:,}.""")
