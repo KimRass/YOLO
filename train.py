@@ -63,10 +63,9 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
     torch.save(ckpt, str(save_path))
 
 
-ANNOT_DIR = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations"
 BATCH_SIZE = 2
 N_WORKERS = 0
-ds = VOC2012Dataset(annot_dir=ANNOT_DIR)
+ds = VOC2012Dataset(annot_dir=config.ANNOT_DIR)
 dl = DataLoader(ds, batch_size=BATCH_SIZE, num_workers=N_WORKERS, pin_memory=True, drop_last=True)
 
 model = YOLOv1(n_classes=len(config.VOC_CLASSES))
