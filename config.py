@@ -27,7 +27,7 @@ TRANSFORM_RATIO = 0.2
 N_BBOXES = 2
 N_CELLS = 7
 CELL_SIZE = IMG_SIZE // N_CELLS
-ANNOT_DIR = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations"
+ANNOT_DIR = "/home/user/cv/voc2012/VOCdevkit/VOC2012/Annotations"
 
 ## Loss function
 LAMB_COORD = 5
