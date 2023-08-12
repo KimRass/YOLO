@@ -1,6 +1,9 @@
 # References:
     # https://github.com/motokimura/yolo_v1_pytorch/blob/master/voc.py
 
+# "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
+# When testing on 2012 we also include the VOC 2007 test data for training."
+
 from pathlib import Path
 import cv2
 import numpy as np
@@ -188,7 +191,7 @@ class VOC2012Dataset(Dataset):
 
         # get_image_dataset_mean_and_std
         image = TF.to_tensor(image)
-        image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
+        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
         gt = self._encode(bboxes)
         return image, gt
 

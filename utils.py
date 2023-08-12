@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm.auto import tqdm
+from time import time
+from datetime import timedelta
 
 import config
 
@@ -52,6 +54,10 @@ def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
     mean = torch.round(sum_rgb / sum_resol, decimals=3)
     std = torch.round((sum_rgb_square / sum_resol - mean ** 2) ** 0.5, decimals=3)
     return mean, std
+
+
+def get_elapsed_time(start_time):
+    return timedelta(seconds=round(time() - start_time))
 
 
 # def draw_bboxes(image, bboxes):

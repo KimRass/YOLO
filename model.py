@@ -79,7 +79,7 @@ class Darknet(nn.Module):
         return x
 
 
-class YOLO(nn.Module):
+class YOLOv1(nn.Module):
     def __init__(self, n_classes, n_grids=7, n_bboxes=2):
         super().__init__()
 
@@ -130,6 +130,6 @@ class YOLO(nn.Module):
 
 
 if __name__ == "__main__":
-    yolo = YOLO(n_classes=21)
+    yolo = YOLOv1(n_classes=21)
     x = torch.randn((4, 3, 448, 448))
     yolo(x).shape
