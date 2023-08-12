@@ -99,10 +99,9 @@ crit = Yolov1Loss()
 ds_size = len(ds)
 n_steps_per_epoch = ds_size // config.BATCH_SIZE
 running_loss = 0
-for epoch in range(1, config.N_EPOCHS + 1):
+for epoch in tqdm(range(1, config.N_EPOCHS + 1)):
     start_time = time()
     running_loss = 0
-    # for step, (image, gt) in enumerate(tqdm(dl), start=1):
     for step, (image, gt) in enumerate(dl, start=1):
         image = image.to(DEVICE)
         gt = gt.to(DEVICE)
@@ -117,6 +116,7 @@ for epoch in range(1, config.N_EPOCHS + 1):
         ) if config.AUTOCAST else nullcontext():
             pred = model(image)
             loss = crit(pred=pred, gt=gt)
+        running_loss += loss.item()
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
@@ -133,13 +133,14 @@ for epoch in range(1, config.N_EPOCHS + 1):
     running_loss = 0
 
     ### Save checkpoint.
-    save_checkpoint(
-        epoc=epoch,
-        step=step,
-        model=model,
-        optim=optim,
-        scaler=scaler,
-        save_path=Path(__file__).parent/f"""checkpoints/{step}.pth""",
-    )
-    print(f"""Saved checkpoint at epoch {epoch}/{config.N_EPOCHS}""", end="")
-    print(f""" and step {step:,}/{n_steps_per_epoch:,}.""")
+    if (epoch % config.N_CKPT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
+        save_checkpoint(
+            epoch=epoch,
+            step=step,
+            model=model,
+            optim=optim,
+            scaler=scaler,
+            save_path=Path(__file__).parent/f"""checkpoints/{epoch}.pth""",
+        )
+        print(f"""Saved checkpoint at epoch {epoch}/{config.N_EPOCHS}""", end="")
+        print(f""" and step {step:,}/{n_steps_per_epoch:,}.""")

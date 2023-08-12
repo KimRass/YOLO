@@ -49,5 +49,5 @@ N_GPUS = torch.cuda.device_count()
 BATCH_SIZE = 64 # "We use a batch size of 64."
 N_EPOCHS = 135 # "We train the network for about 135 epochs."
 AUTOCAST = True
-N_PRINT_STEPS = 1000
-N_CKPT_STEPS = 4000
+# N_PRINT_STEPS = 1000
+N_CKPT_EPOCHS = 10
