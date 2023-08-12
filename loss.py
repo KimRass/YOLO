@@ -15,6 +15,8 @@ class Yolov1Loss(nn.Module):
         self.mse = nn.MSELoss(reduction="sum")
 
     def forward(self, pred, gt):
+        b, _, _, _ = pred.shape
+
         pred = pred.permute(0, 2, 3, 1)
         gt = gt.permute(0, 2, 3, 1)
 
@@ -57,6 +59,7 @@ class Yolov1Loss(nn.Module):
         cls_loss = self.mse(pred_cls_obj, gt_cls_obj)
 
         loss = coord_loss + conf_loss + cls_loss
+        loss /= b
         return loss
 
 
