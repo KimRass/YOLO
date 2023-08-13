@@ -104,28 +104,19 @@ class Yolov1Loss(nn.Module):
 
 
 if __name__ == "__main__":
+    model = YOLOv1()
+    optim = SGD(
+        model.parameters(),
+        lr=0.0005,
+        momentum=config.MOMENTUM,
+        weight_decay=config.WEIGHT_DECAY
+    )
+
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    # ds[100][0].show()
     dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
+    
     image, gt = next(di)
-    pred = model(image)
-
-    # from torchvision.utils import make_grid
-    # import torchvision.transforms.functional as TF
-    # TF.to_pil_image((image[0] * 0.5 + 0.5)).show()
-
-    # pred = pred.permute(0, 2, 3, 1)
-    # pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
-    
-    model = YOLOv1()
-    mse = nn.MSELoss(reduction="sum")
-    
-    # obj_mask = (gt[:, 4, ...] == 1)
-    # global obj_indices, noobj_indices
-    # obj_indices = obj_mask.nonzero(as_tuple=True)
-    
-    # gt = gt.permute(0, 2, 3, 1)
 
     crit = Yolov1Loss()
     for _ in range(1000):
@@ -133,22 +124,16 @@ if __name__ == "__main__":
         
         pred = model(image)
         
-        loss = crit(pred, gt)
-        # pred[0, 9, ...]
-        # pred = pred.permute(0, 2, 3, 1)
-        # pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
-        
-        # # loss = crit(pred=pred, gt=gt)
-        # conf_indices = (4, 9)
-        # pred_conf_obj = pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
-        # gt_conf_obj = gt[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
-        # loss = mse(pred_conf_obj, gt_conf_obj)
-        # print(pred_conf_obj)
-        
+        # loss = crit(pred, gt)
+        loss = mse(pred[0, 4, 0, 0], gt[0, 4, 0, 0])
         loss.backward()
-        print(loss)
+        print(loss, pred[0, 4, 0, 0], gt[0, 4, 0, 0])
+
         optim.step()
 
 
-    gt[0, 4, ...]
-    pred[0, 4, ...]
+
+    gt[0, 4, 0, 0]
+    pred[0, 4, 0, 0]
+
+    mse = nn.MSELoss(reduction="sum")

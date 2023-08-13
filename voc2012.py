@@ -153,8 +153,8 @@ class VOC2012Dataset(Dataset):
 
         image = TF.to_tensor(image)
         # get_image_dataset_mean_and_std
-        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
-        image = TF.normalize(image, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+        image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
+        # image = TF.normalize(image, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 
         bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]].clip(0, config.IMG_SIZE)
         bboxes = bboxes[(bboxes["x1"] != bboxes["x2"]) & (bboxes["y1"] != bboxes["y2"])]

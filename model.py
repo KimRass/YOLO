@@ -8,8 +8,6 @@ import torch.nn.functional as F
 import config
 
 
-
-
 class ConvBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True
@@ -87,8 +85,6 @@ class YOLOv1(nn.Module):
 
         self.darknet = Darknet()
 
-        # "We use a linear activation function for the final layer and all other layers use
-        # the leaky rectified linear activation."
         self.conv5_3 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
         self.conv5_4 = ConvBlock(1024, 1024, kernel_size=3, stride=2, padding=1) # "3×3×1024-s-2"
 
@@ -99,14 +95,9 @@ class YOLOv1(nn.Module):
         self.proj2 = nn.Linear(
             4096, config.N_CELLS * config.N_CELLS * (5 * config.N_BBOXES + len(config.VOC_CLASSES))
         )
-
         # "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation
         # between layers"
         self.drop = nn.Dropout(0.5)
-
-        self.leakyrelu = nn.LeakyReLU(0.1)
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
 
         self._init_weights()
     
@@ -135,12 +126,13 @@ class YOLOv1(nn.Module):
         x = torch.flatten(x, start_dim=1, end_dim=3)
         x = self.proj1(x)
         x = self.drop(x)
-        x = torch.relu(x)
+        x = F.leaky_relu(x, negative_slope=config.LEAKY_RELU_SLOPE)
         x = self.proj2(x)
-        x = self.relu(x)
+        x = torch.sigmoid(x)
+        # "We use a linear activation function for the final layer and all other layers use
+        # the leaky rectified linear activation."
 
         x = x.view((-1, (5 * config.N_BBOXES + len(config.VOC_CLASSES)), config.N_CELLS, config.N_CELLS))
-        x = self.sigmoid(x)
         return x
 
 
