@@ -151,12 +151,13 @@ class VOC2012Dataset(Dataset):
         image = self._randomly_adjust_b_and_s(image)
         image, bboxes = self._crop_center(image=image, bboxes=bboxes)
 
+        image = TF.to_tensor(image)
+        # get_image_dataset_mean_and_std
+        # image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
+        image = TF.normalize(image, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
+
         bboxes[["x1", "y1", "x2", "y2"]] = bboxes[["x1", "y1", "x2", "y2"]].clip(0, config.IMG_SIZE)
         bboxes = bboxes[(bboxes["x1"] != bboxes["x2"]) & (bboxes["y1"] != bboxes["y2"])]
-
-        # get_image_dataset_mean_and_std
-        image = TF.to_tensor(image)
-        image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
         gt = self._encode(bboxes)
         return image, gt
 

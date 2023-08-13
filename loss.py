@@ -42,15 +42,14 @@ class Yolov1Loss(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.mse = nn.MSELoss(reduction="sum")
-
-        self.xy_indices = (0, 1, 5, 6)
-        self.wh_indices = (2, 3, 7, 8)
-        self.conf_indices = (4, 9)
-        self.cls_indices = range(10, 30)
-
     def forward(self, pred, gt):
-        # pred.shape, gt.shape
+        mse = nn.MSELoss(reduction="sum")
+
+        xy_indices = (0, 1, 5, 6)
+        wh_indices = (2, 3, 7, 8)
+        conf_indices = (4, 9)
+        cls_indices = range(10, 30)
+
         b, _, _, _ = pred.shape
 
         pred = pred.permute(0, 2, 3, 1)
@@ -63,74 +62,92 @@ class Yolov1Loss(nn.Module):
         noobj_indices = noobj_mask.nonzero(as_tuple=True)
 
         ### Coordinate loss
-        pred_xy_obj = pred[..., self.xy_indices][obj_indices]
-        gt_xy_obj = gt[..., self.xy_indices][obj_indices]
-        # pred_xy_obj
-        # gt_xy_obj
+        pred_xy_obj = pred[..., xy_indices][obj_indices]
+        gt_xy_obj = gt[..., xy_indices][obj_indices]
         # The 1st term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
             # \bigg[ (x_{i} - \hat{x}_{i})^{2} + (y_{i} - \hat{y}_{i})^{2} \bigg]$$"
-        xy_loss = LAMB_COORD * self.mse(pred_xy_obj, gt_xy_obj)
-        # xy_loss
+        xy_loss = LAMB_COORD * mse(pred_xy_obj, gt_xy_obj)
 
-        pred_wh_obj = pred[..., self.wh_indices][obj_indices]
-        gt_wh_obj = gt[..., self.wh_indices][obj_indices]
-        # pred_wh_obj ** 0.5
-        # gt_wh_obj ** 0.5
+        pred_wh_obj = pred[..., wh_indices][obj_indices]
+        gt_wh_obj = gt[..., wh_indices][obj_indices]
         # The 2nd term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
             # \bigg[ (\sqrt{w_{i}} - \sqrt{\hat{w}_{i}})^{2} + (\sqrt{h_{i}} - \sqrt{\hat{h}_{i}})^{2} \bigg]$$"
-        wh_loss = LAMB_COORD * self.mse(pred_wh_obj ** 0.5, gt_wh_obj ** 0.5)
+        wh_loss = LAMB_COORD * mse(pred_wh_obj ** 0.5, gt_wh_obj ** 0.5)
         coord_loss = xy_loss + wh_loss
-        # coord_loss
 
         ### Confidence loss
-        pred_conf_obj = pred[..., self.conf_indices][obj_indices]
-        gt_conf_obj = gt[..., self.conf_indices][obj_indices]
-        # pred_conf_obj
-        # gt_conf_obj
+        pred_conf_obj = pred[..., conf_indices][obj_indices]
+        gt_conf_obj = gt[..., conf_indices][obj_indices]
         # The 3rd term; "$$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
             # \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{i})^{2}$$"
-        conf_loss_obj = self.mse(pred_conf_obj, gt_conf_obj)
+        conf_loss_obj = mse(pred_conf_obj, gt_conf_obj)
 
-        pred_conf_noobj = pred[..., self.conf_indices][noobj_indices]
-        gt_conf_noobj = gt[..., self.conf_indices][noobj_indices]
-        # gt_conf_noobj
+        pred_conf_noobj = pred[..., conf_indices][noobj_indices]
+        gt_conf_noobj = gt[..., conf_indices][noobj_indices]
         # The 4th term; "$$\lambda_{noobj} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
             # 1^{noobj}_{ij} \big( C_{i} - \hat{C}_{i} \big)^{2}$$"
-        conf_loss_noobj = LAMB_NOOBJ * self.mse(pred_conf_noobj, gt_conf_noobj)
+        conf_loss_noobj = LAMB_NOOBJ * mse(pred_conf_noobj, gt_conf_noobj)
 
         conf_loss = conf_loss_obj + conf_loss_noobj
-        # conf_loss_noobj
 
         ### Classification loss
-        pred_cls_obj = pred[..., self.cls_indices][obj_indices]
-        gt_cls_obj = gt[..., self.cls_indices][obj_indices]
+        pred_cls_obj = pred[..., cls_indices][obj_indices]
+        gt_cls_obj = gt[..., cls_indices][obj_indices]
         # The 5th term; "$$\sum^{S^{2}}_{i = 0} \mathbb{1}^{obj}_{i} \sum_{c \in classes}\
             # \big(p_{i}(c) - \hat{p}_{i}(c)\big)^{2}$$"
-        cls_loss = self.mse(pred_cls_obj, gt_cls_obj)
+        cls_loss = mse(pred_cls_obj, gt_cls_obj)
 
         loss = coord_loss + conf_loss + cls_loss
-        # coord_loss, conf_loss, cls_loss
         loss /= b
         return loss
 
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    dl = DataLoader(ds, batch_size=16, num_workers=0, pin_memory=True, drop_last=True)
+    # ds[100][0].show()
+    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
     image, gt = next(di)
-    crit = Yolov1Loss()
+    pred = model(image)
 
-    for _ in range(100):
+    # from torchvision.utils import make_grid
+    # import torchvision.transforms.functional as TF
+    # TF.to_pil_image((image[0] * 0.5 + 0.5)).show()
+
+    # pred = pred.permute(0, 2, 3, 1)
+    # pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
+    
+    model = YOLOv1()
+    mse = nn.MSELoss(reduction="sum")
+    
+    # obj_mask = (gt[:, 4, ...] == 1)
+    # global obj_indices, noobj_indices
+    # obj_indices = obj_mask.nonzero(as_tuple=True)
+    
+    # gt = gt.permute(0, 2, 3, 1)
+
+    crit = Yolov1Loss()
+    for _ in range(1000):
         optim.zero_grad()
         
         pred = model(image)
-        loss = crit(pred=pred, gt=gt)
-        # loss /= 10
-        print(loss)
+        
+        loss = crit(pred, gt)
+        # pred[0, 9, ...]
+        # pred = pred.permute(0, 2, 3, 1)
+        # pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
+        
+        # # loss = crit(pred=pred, gt=gt)
+        # conf_indices = (4, 9)
+        # pred_conf_obj = pred[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
+        # gt_conf_obj = gt[obj_indices[0], obj_indices[1], obj_indices[2], conf_indices]
+        # loss = mse(pred_conf_obj, gt_conf_obj)
+        # print(pred_conf_obj)
         
         loss.backward()
+        print(loss)
         optim.step()
 
-    gt[0, 0, ...]
-    pred[0, 0, ...]
+
+    gt[0, 4, ...]
+    pred[0, 4, ...]

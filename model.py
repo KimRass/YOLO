@@ -8,6 +8,8 @@ import torch.nn.functional as F
 import config
 
 
+
+
 class ConvBlock(nn.Module):
     def __init__(
         self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True
@@ -105,7 +107,22 @@ class YOLOv1(nn.Module):
         self.leakyrelu = nn.LeakyReLU(0.1)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
+
+        self._init_weights()
     
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
     def forward(self, x):
         x = self.darknet(x)
 
@@ -123,7 +140,7 @@ class YOLOv1(nn.Module):
         x = self.relu(x)
 
         x = x.view((-1, (5 * config.N_BBOXES + len(config.VOC_CLASSES)), config.N_CELLS, config.N_CELLS))
-        x = self.sigmoid(x)
+        # x = self.sigmoid(x)
         return x
 
 
