@@ -8,34 +8,34 @@ LAMB_COORD = 5
 LAMB_NOOBJ = 0.5
 
 
-def decode(pred):
-    bboxes = pred.clone()
+# def decode(pred):
+#     bboxes = pred.clone()
 
-    bboxes = bboxes[:, : 10, ...]
-    # bboxes = bboxes.view(-1, config.N_BBOXES, 4, config.N_CELLS, config.N_CELLS)
-    bboxes = bboxes.view(-1, config.N_BBOXES, 5, config.N_CELLS, config.N_CELLS)
-    bboxes = bboxes.permute(0, 1, 3, 4, 2)
+#     bboxes = bboxes[:, : 10, ...]
+#     # bboxes = bboxes.view(-1, config.N_BBOXES, 4, config.N_CELLS, config.N_CELLS)
+#     bboxes = bboxes.view(-1, config.N_BBOXES, 5, config.N_CELLS, config.N_CELLS)
+#     bboxes = bboxes.permute(0, 1, 3, 4, 2)
 
 
 
-    gt[..., 2] *= config.IMG_SIZE # w
-    gt[..., 3] *= config.IMG_SIZE # h
+#     gt[..., 2] *= config.IMG_SIZE # w
+#     gt[..., 3] *= config.IMG_SIZE # h
 
-    gt[..., 0] *= config.CELL_SIZE # x
-    gt[..., 0] += torch.linspace(0, config.IMG_SIZE - config.CELL_SIZE, config.N_CELLS).unsqueeze(0)
-    gt[..., 1] *= config.CELL_SIZE # y
-    gt[..., 1] += torch.linspace(0, config.IMG_SIZE - config.CELL_SIZE, config.N_CELLS).unsqueeze(1)
+#     gt[..., 0] *= config.CELL_SIZE # x
+#     gt[..., 0] += torch.linspace(0, config.IMG_SIZE - config.CELL_SIZE, config.N_CELLS).unsqueeze(0)
+#     gt[..., 1] *= config.CELL_SIZE # y
+#     gt[..., 1] += torch.linspace(0, config.IMG_SIZE - config.CELL_SIZE, config.N_CELLS).unsqueeze(1)
 
-    x1 = gt[..., 0] - gt[..., 2] / 2
-    y1 = gt[..., 1] - gt[..., 3] / 2
-    x2 = gt[..., 0] + gt[..., 2] / 2
-    y2 = gt[..., 1] + gt[..., 3] / 2
-    # conf = gt[..., 4]
-    gt = torch.stack([x1, y1, x2, y2], dim=3)
-    gt[0, ..., 3]
+#     x1 = gt[..., 0] - gt[..., 2] / 2
+#     y1 = gt[..., 1] - gt[..., 3] / 2
+#     x2 = gt[..., 0] + gt[..., 2] / 2
+#     y2 = gt[..., 1] + gt[..., 3] / 2
+#     # conf = gt[..., 4]
+#     gt = torch.stack([x1, y1, x2, y2], dim=3)
+#     gt[0, ..., 3]
 
-    gt = rearrange(gt, pattern="b c h w k -> b (c h w) k")
-    return bboxes
+#     gt = rearrange(gt, pattern="b c h w k -> b (c h w) k")
+#     return bboxes
 
 
 class Yolov1Loss(nn.Module):
