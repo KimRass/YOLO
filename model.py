@@ -140,7 +140,7 @@ class YOLOv1(nn.Module):
         x = self.relu(x)
 
         x = x.view((-1, (5 * config.N_BBOXES + len(config.VOC_CLASSES)), config.N_CELLS, config.N_CELLS))
-        # x = self.sigmoid(x)
+        x = self.sigmoid(x)
         return x
 
 
