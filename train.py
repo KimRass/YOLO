@@ -72,7 +72,7 @@ dl = DataLoader(
     drop_last=True,
 )
 
-model = YOLOv1(n_classes=len(config.VOC_CLASSES))
+model = YOLOv1()
 if config.N_GPUS > 0:
     DEVICE = torch.device("cuda")
     model = model.to(DEVICE)
@@ -133,8 +133,6 @@ for epoch in range(1, config.N_EPOCHS + 1):
         # print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
         print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ]""", end="")
         print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / config.N_PRINT_EPOCHS:.6f} ]""")
-
-        running_loss = 0
 
     ### Save checkpoint.
     if (epoch % config.N_CKPT_EPOCHS == 0) or (epoch == config.N_EPOCHS):

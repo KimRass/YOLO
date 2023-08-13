@@ -1,5 +1,8 @@
 import torch
 
+### Architecture
+LEAKY_RELU_SLOPE = 0.1
+
 ### Data
 VOC_CLASSES = [
     "aeroplane",

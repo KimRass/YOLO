@@ -163,12 +163,19 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    # image, gt = ds[10]
-    # vis = draw_bboxes(image=image, bboxes=bboxes, grids=True)
-    # vis.show()
-
-    dl = DataLoader(ds, batch_size=128, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
-    from tqdm.auto import tqdm
-    for _ in tqdm(range(10000)):
-        next(di)
+    image, gt = next(di)
+
+    optim.zero_grad()
+    
+    pred = model(image)
+    loss = crit(pred=pred, gt=gt)
+    loss /= 10
+    
+    loss.backward()
+    print(loss)
+    optim.step()
+    
+    gt[0, 0, ...]
+    pred[0, 0, ...]

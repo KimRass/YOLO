@@ -1,14 +1,16 @@
 # References
-    # https://github.com/motokimura/yolo_v1_pytorch/blob/master/yolo_v1.py
+    # https://github.com/motokimura/model_v1_pytorch/blob/master/model_v1.py
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import config
+
 
 class ConvBlock(nn.Module):
     def __init__(
-        self, in_channels, out_channels, kernel_size, stride=1, padding=0, groups=1, bias=True
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True
     ):
         super().__init__()
 
@@ -18,14 +20,12 @@ class ConvBlock(nn.Module):
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
-            groups=groups,
             bias=bias
         )
-        self.leakyrelu = nn.LeakyReLU(0.1)
     
     def forward(self, x):
         x = self.conv(x)
-        x = self.leakyrelu(x)
+        x = F.leaky_relu(x, negative_slope=config.LEAKY_RELU_SLOPE)
         return x
 
 
@@ -33,24 +33,24 @@ class Darknet(nn.Module):
     def __init__(self):
         super().__init__()
     
-        self.conv1_1 = ConvBlock(3, 64, kernel_size=7, stride=2, padding=3)
+        self.conv1_1 = ConvBlock(3, 64, kernel_size=7, stride=2, padding=3) # "7×7×64-s-2"
 
-        self.conv2_1 = ConvBlock(64, 192, kernel_size=3, padding=1)
+        self.conv2_1 = ConvBlock(64, 192, kernel_size=3, padding=1) # "3×3×192"
 
-        self.conv3_1 = ConvBlock(192, 128, kernel_size=1)
-        self.conv3_2 = ConvBlock(128, 256, kernel_size=3, padding=1)
-        self.conv3_3 = ConvBlock(256, 256, kernel_size=1)
-        self.conv3_4 = ConvBlock(256, 512, kernel_size=3, padding=1)
+        self.conv3_1 = ConvBlock(192, 128, kernel_size=1) # "1×1×128"
+        self.conv3_2 = ConvBlock(128, 256, kernel_size=3, padding=1)  # "3×3×256"
+        self.conv3_3 = ConvBlock(256, 256, kernel_size=1) # "1×1×256"
+        self.conv3_4 = ConvBlock(256, 512, kernel_size=3, padding=1) # "3×3×512"
 
-        self.conv4_1 = ConvBlock(512, 256, kernel_size=1)
-        self.conv4_2 = ConvBlock(256, 512, kernel_size=3, padding=1)
-        self.conv4_3 = ConvBlock(512, 512, kernel_size=1)
-        self.conv4_4 = ConvBlock(512, 1024, kernel_size=3, padding=1)
+        self.conv4_1 = ConvBlock(512, 256, kernel_size=1) # "1×1×256"
+        self.conv4_2 = ConvBlock(256, 512, kernel_size=3, padding=1) # "3×3×512"
+        self.conv4_3 = ConvBlock(512, 512, kernel_size=1) # "1×1×512"
+        self.conv4_4 = ConvBlock(512, 1024, kernel_size=3, padding=1) # "3×3×1024"
 
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
 
-        self.conv5_1 = ConvBlock(1024, 512, kernel_size=1)
-        self.conv5_2 = ConvBlock(512, 1024, kernel_size=3, padding=1)
+        self.conv5_1 = ConvBlock(1024, 512, kernel_size=1) # "1×1×512"
+        self.conv5_2 = ConvBlock(512, 1024, kernel_size=3, padding=1) # "3×3×1024"
 
 
     def forward(self, x):
@@ -66,70 +66,70 @@ class Darknet(nn.Module):
         x = self.conv3_4(x)
         x = self.maxpool(x)
 
-        for _ in range(4):
+        for _ in range(4): # "×4"
             x = self.conv4_1(x)
             x = self.conv4_2(x)
         x = self.conv4_3(x)
         x = self.conv4_4(x)
         x = self.maxpool(x)
 
-        for _ in range(2):
+        for _ in range(2): # "×2"
             x = self.conv5_1(x)
             x = self.conv5_2(x)
         return x
 
 
 class YOLOv1(nn.Module):
-    def __init__(self, n_classes, n_grids=7, n_bboxes=2):
+    def __init__(self):
         super().__init__()
 
         self.darknet = Darknet()
-        self.n_classes = n_classes
-        self.n_grids = n_grids
-        self.n_bboxes = n_bboxes
 
-        self.conv5_3 = ConvBlock(1024, 1024, kernel_size=3, padding=1)
-        self.conv5_4 = ConvBlock(1024, 1024, kernel_size=3, stride=2, padding=1)
+        # "We use a linear activation function for the final layer and all other layers use
+        # the leaky rectified linear activation."
+        self.conv5_3 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
+        self.conv5_4 = ConvBlock(1024, 1024, kernel_size=3, stride=2, padding=1) # "3×3×1024-s-2"
 
-        self.conv6_1 = ConvBlock(1024, 1024, kernel_size=3, padding=1)
+        self.conv6_1 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
+        self.conv6_2 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
 
-        self.flatten = nn.Flatten(start_dim=1, end_dim=3)
-        self.linear1 = nn.Linear(1024 * n_grids * n_grids, 4096)
-        self.linear2 = nn.Linear(4096, n_grids * n_grids * (5 * n_bboxes + n_classes))
+        self.proj1 = nn.Linear(1024 * config.N_CELLS * config.N_CELLS, 4096)
+        self.proj2 = nn.Linear(
+            4096, config.N_CELLS * config.N_CELLS * (5 * config.N_BBOXES + len(config.VOC_CLASSES))
+        )
 
         # "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation
         # between layers"
-        self.dropout = nn.Dropout(0.5)
+        self.drop = nn.Dropout(0.5)
 
         self.leakyrelu = nn.LeakyReLU(0.1)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
     
     def forward(self, x):
-        b, c, h, w = x.shape
-
         x = self.darknet(x)
 
         x = self.conv5_3(x)
         x = self.conv5_4(x)
 
         x = self.conv6_1(x)
-        
-        x = self.flatten(x)
-        x = self.linear1(x)
-        x = self.dropout(x)
-        x = self.leakyrelu(x)
-
-        x = self.linear2(x)
-        x = x.view((b, (5 * self.n_bboxes + self.n_classes), self.n_grids, self.n_grids))
+        x = self.conv6_2(x)
+    
+        x = torch.flatten(x, start_dim=1, end_dim=3)
+        x = self.proj1(x)
+        x = self.drop(x)
+        x = torch.relu(x)
+        x = self.proj2(x)
         x = self.relu(x)
-        # x = self.sigmoid(x)
 
-        # x[:, 10:, ...] = F.softmax(x[:, 10:, ...], dim=1)
+        x = x.view((-1, (5 * config.N_BBOXES + len(config.VOC_CLASSES)), config.N_CELLS, config.N_CELLS))
+        x = self.sigmoid(x)
         return x
 
 
 if __name__ == "__main__":
-    yolo = YOLOv1(n_classes=21)
+    model = YOLOv1()
     x = torch.randn((4, 3, 448, 448))
-    yolo(x).shape
+    out = model(x)
+    out.shape
+    
