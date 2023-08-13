@@ -117,8 +117,9 @@ for epoch in range(1, config.N_EPOCHS + 1):
         ) if config.AUTOCAST else nullcontext():
             pred = model(image)
             loss = crit(pred=pred, gt=gt)
-        running_loss += loss.item() / 100
-        # print(loss.item() / 100, running_loss)
+
+        running_loss += loss.item()
+        print(loss.item(), running_loss)
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
@@ -130,7 +131,6 @@ for epoch in range(1, config.N_EPOCHS + 1):
 
     ### Print loss.
     if (epoch % config.N_PRINT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
-        # print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ][ {lr:4f} ]""", end="")
         print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ]""", end="")
         print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / config.N_PRINT_EPOCHS:.6f} ]""")
 

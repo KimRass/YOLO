@@ -116,7 +116,7 @@ class Yolov1Loss(nn.Module):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=16, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
     image, gt = next(di)
     crit = Yolov1Loss()
