@@ -78,6 +78,7 @@ class Yolov1Loss(nn.Module):
         ### Confidence loss
         pred_conf_obj = pred[..., conf_indices][obj_indices]
         gt_conf_obj = gt[..., conf_indices][obj_indices]
+        print(pred_conf_obj)
         # The 3rd term; "$$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
             # \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{i})^{2}$$"
         conf_loss_obj = mse(pred_conf_obj, gt_conf_obj)
