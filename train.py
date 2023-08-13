@@ -119,7 +119,7 @@ for epoch in range(1, config.N_EPOCHS + 1):
             loss = crit(pred=pred, gt=gt)
 
         running_loss += loss.item()
-        print(loss.item(), running_loss)
+        # print(loss.item(), running_loss)
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
