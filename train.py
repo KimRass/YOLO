@@ -64,7 +64,10 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
 def load_checkpoint(model, optim, scaler):
     ckpt = torch.load(config.CKPT_PATH, map_location=config.DEVICE)
     epoch = ckpt["epoch"]
-    model.load_state_dict(ckpt["model"])
+    if config.N_GPUS > 1 and config.MULTI_GPU:
+        model.module.load_state_dict(ckpt["model"])
+    else:
+        model.load_state_dict(ckpt["model"])
     optim.load_state_dict(ckpt["optimizer"])
     scaler.load_state_dict(ckpt["scaler"])
     return epoch
@@ -104,6 +107,7 @@ scaler = GradScaler()
 ### Resume from checkpoint.
 if config.CKPT_PATH is not None:
     init_epoch = load_checkpoint(model=model, optim=optim, scaler=scaler)
+    print(f"""Resuming from epoch {init_epoch}.""")
 else:
     init_epoch = 0
 
