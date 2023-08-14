@@ -50,8 +50,15 @@ N_WORKERS = 4
 MULTI_GPU = True
 AUTOCAST = True
 N_GPUS = torch.cuda.device_count()
+if N_GPUS > 0:
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
 BATCH_SIZE = 64 # "We use a batch size of 64."
 # N_EPOCHS = 135 # "We train the network for about 135 epochs."
 N_EPOCHS = 200 # Train longer than in the paper
 N_PRINT_EPOCHS = 1
 N_CKPT_EPOCHS = 10
+
+### Checkpoint
+CKPT_PATH = "./checkpoints/135.pth"

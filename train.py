@@ -50,7 +50,6 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
 
     ckpt = {
         "epoch": epoch,
-        "step": step,
         "optimizer": optim.state_dict(),
         "scaler": scaler.state_dict(),
     }
@@ -60,6 +59,15 @@ def save_checkpoint(epoch, step, model, optim, scaler, save_path):
         ckpt["model"] = model.state_dict()
 
     torch.save(ckpt, str(save_path))
+
+
+def load_checkpoint(model, optim, scaler):
+    ckpt = torch.load(config.CKPT_PATH, map_location=config.DEVICE)
+    epoch = ckpt["epoch"]
+    model.load_state_dict(ckpt["model"])
+    optim.load_state_dict(ckpt["optimizer"])
+    scaler.load_state_dict(ckpt["scaler"])
+    return epoch
 
 
 ds = VOC2012Dataset(annot_dir=config.ANNOT_DIR)
@@ -74,8 +82,7 @@ dl = DataLoader(
 
 model = YOLOv1()
 if config.N_GPUS > 0:
-    DEVICE = torch.device("cuda")
-    model = model.to(DEVICE)
+    model = model.to(config.DEVICE)
     if config.N_GPUS > 1 and config.MULTI_GPU:
         model = nn.DataParallel(model)
 
@@ -94,6 +101,12 @@ optim = SGD(
 
 scaler = GradScaler()
 
+### Resume from checkpoint.
+if config.CKPT_PATH is not None:
+    init_epoch = load_checkpoint(model=model, optim=optim, scaler=scaler)
+else:
+    init_epoch = 0
+
 crit = Yolov1Loss()
 
 ds_size = len(ds)
@@ -101,11 +114,11 @@ n_steps_per_epoch = ds_size // config.BATCH_SIZE
 start_time = time()
 
 running_loss = 0
-for epoch in range(1, config.N_EPOCHS + 1):
+for epoch in range(init_epoch + 1, config.N_EPOCHS + 1):
     running_loss = 0
     for step, (image, gt) in enumerate(dl, start=1):
-        image = image.to(DEVICE)
-        gt = gt.to(DEVICE)
+        image = image.to(config.DEVICE)
+        gt = gt.to(config.DEVICE)
 
         lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
         update_lr(lr=lr, optim=optim)
@@ -113,7 +126,7 @@ for epoch in range(1, config.N_EPOCHS + 1):
         optim.zero_grad()
 
         with torch.autocast(
-            device_type=DEVICE.type, dtype=torch.float16
+            device_type=config.DEVICE.type, dtype=torch.float16
         ) if config.AUTOCAST else nullcontext():
             pred = model(image)
             loss = crit(pred=pred, gt=gt)
