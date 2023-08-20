@@ -9,8 +9,7 @@ import pandas as pd
 from PIL import Image
 import xml.etree.ElementTree as et
 import torch
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 import random
 
