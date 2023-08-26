@@ -1,5 +1,5 @@
 # References
-    # https://github.com/motokimura/model_v1_pytorch/blob/master/model_v1.py
+    # https://github.com/motokimura/yolo_v1_pytorch/blob/master/yolo_v1.py
 
 import torch
 import torch.nn as nn
@@ -34,20 +34,22 @@ class Darknet(nn.Module):
         super().__init__()
     
         self.conv1_1 = ConvBlock(3, 64, kernel_size=7, stride=2, padding=3) # "7×7×64-s-2"
+        self.maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
 
         self.conv2_1 = ConvBlock(64, 192, kernel_size=3, padding=1) # "3×3×192"
+        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
 
         self.conv3_1 = ConvBlock(192, 128, kernel_size=1) # "1×1×128"
         self.conv3_2 = ConvBlock(128, 256, kernel_size=3, padding=1)  # "3×3×256"
         self.conv3_3 = ConvBlock(256, 256, kernel_size=1) # "1×1×256"
         self.conv3_4 = ConvBlock(256, 512, kernel_size=3, padding=1) # "3×3×512"
+        self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
 
         self.conv4_1 = ConvBlock(512, 256, kernel_size=1) # "1×1×256"
         self.conv4_2 = ConvBlock(256, 512, kernel_size=3, padding=1) # "3×3×512"
         self.conv4_3 = ConvBlock(512, 512, kernel_size=1) # "1×1×512"
         self.conv4_4 = ConvBlock(512, 1024, kernel_size=3, padding=1) # "3×3×1024"
-
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
+        self.maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2) # "2×2×s-2"
 
         self.conv5_1 = ConvBlock(1024, 512, kernel_size=1) # "1×1×512"
         self.conv5_2 = ConvBlock(512, 1024, kernel_size=3, padding=1) # "3×3×1024"
@@ -55,23 +57,23 @@ class Darknet(nn.Module):
 
     def forward(self, x):
         x = self.conv1_1(x)
-        x = self.maxpool(x)
+        x = self.maxpool1(x)
 
         x = self.conv2_1(x)
-        x = self.maxpool(x)
+        x = self.maxpool2(x)
 
         x = self.conv3_1(x)
         x = self.conv3_2(x)
         x = self.conv3_3(x)
         x = self.conv3_4(x)
-        x = self.maxpool(x)
+        x = self.maxpool3(x)
 
         for _ in range(4): # "×4"
             x = self.conv4_1(x)
             x = self.conv4_2(x)
         x = self.conv4_3(x)
         x = self.conv4_4(x)
-        x = self.maxpool(x)
+        x = self.maxpool4(x)
 
         for _ in range(2): # "×2"
             x = self.conv5_1(x)
