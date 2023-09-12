@@ -121,14 +121,13 @@ running_loss = 0
 for epoch in range(init_epoch + 1, config.N_EPOCHS + 1):
     running_loss = 0
     for step, (image, gt) in enumerate(dl, start=1):
-        image = image.to(config.DEVICE)
-        gt = gt.to(config.DEVICE)
-
         lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
         update_lr(lr=lr, optim=optim)
 
-        optim.zero_grad()
+        image = image.to(config.DEVICE)
+        gt = gt.to(config.DEVICE)
 
+        optim.zero_grad()
         with torch.autocast(
             device_type=config.DEVICE.type, dtype=torch.float16
         ) if config.AUTOCAST else nullcontext():
@@ -136,7 +135,6 @@ for epoch in range(init_epoch + 1, config.N_EPOCHS + 1):
             loss = crit(pred=pred, gt=gt)
 
         running_loss += loss.item()
-        # print(loss.item(), running_loss)
 
         if config.AUTOCAST:
             scaler.scale(loss).backward()
