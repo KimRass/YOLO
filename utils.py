@@ -6,33 +6,71 @@ from pathlib import Path
 from tqdm.auto import tqdm
 from time import time
 from datetime import timedelta
-
-import config
-
-IMG_SIZE = 448
-N_CELLS = 7
-CELL_SIZE = IMG_SIZE // N_CELLS
+from einops import rearrange
 
 
-def draw_bboxes(image: Image.Image, bboxes: pd.DataFrame, grids: bool) -> None:
-    canvas = image.copy()
-    draw = ImageDraw.Draw(canvas)
+def decode(tensor, img_size=448, n_cells=7):
+    cell_size = img_size // n_cells
 
-    if grids:
-        for i in range(1, N_CELLS): # Draw grids
-            draw.line(xy=(CELL_SIZE * i, 0, CELL_SIZE * i, IMG_SIZE), fill="rgb(150, 150, 150)", width=1)
-            draw.line(xy=(0, CELL_SIZE * i, IMG_SIZE, CELL_SIZE * i), fill="rgb(150, 150, 150)", width=1)
+    bbox = tensor.clone()
 
-    for row in bboxes.itertuples(): # Draw bboxes
-        draw.rectangle(
-            xy=(row.x1, row.y1, row.x2, row.y2),
-            outline="rgb(255, 0, 0)",
-            fill=None,
-            width=1,
-        )
-        draw.line(xy=(row.x1, row.y1, row.x2, row.y2), fill="rgb(255, 0, 0)", width=1)
-        draw.line(xy=(row.x1, row.y2, row.x2, row.y1), fill="rgb(255, 0, 0)", width=1)
-    return canvas
+    bbox[:, (2, 7), ...] *= img_size # w
+    bbox[:, (3, 8), ...] *= img_size # h
+
+    bbox[:, (0, 5), ...] *= cell_size # x
+    bbox[:, (0, 5), ...] += torch.linspace(0, img_size - cell_size, n_cells).unsqueeze(0)
+    bbox[:, (1, 6), ...] *= cell_size # y
+    bbox[:, (1, 6), ...] += torch.linspace(0, img_size - cell_size, n_cells).unsqueeze(1)
+
+    x1 = (bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2).round()
+    y1 = (bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2).round()
+    x2 = (bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2).round()
+    y2 = (bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2).round()
+
+    bbox[:, (0, 5), ...] = x1
+    bbox[:, (1, 6), ...] = y1
+    bbox[:, (2, 7), ...] = x2
+    bbox[:, (3, 8), ...] = y2
+    bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...] = torch.clip(
+        bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...], min=0, max=img_size
+    )
+
+    bbox1 = torch.cat([bbox[:, : 5, ...], bbox[:, 10:, ...]], dim=1)
+    bbox1 = rearrange(bbox1, pattern="b c h w -> b (h w) c")
+
+    bbox2 = torch.cat([bbox[:, 5: 10, ...], bbox[:, 10:, ...]], dim=1)
+    bbox2 = rearrange(bbox2, pattern="b c h w -> b (h w) c")
+
+    bbox = torch.cat([bbox1, bbox2], dim=1)
+    return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
+
+
+# import config
+
+# IMG_SIZE = 448
+# N_CELLS = 7
+# CELL_SIZE = IMG_SIZE // N_CELLS
+
+
+# def draw_bboxes(image: Image.Image, bboxes: pd.DataFrame, grids: bool) -> None:
+#     canvas = image.copy()
+#     draw = ImageDraw.Draw(canvas)
+
+#     if grids:
+#         for i in range(1, N_CELLS): # Draw grids
+#             draw.line(xy=(CELL_SIZE * i, 0, CELL_SIZE * i, IMG_SIZE), fill="rgb(150, 150, 150)", width=1)
+#             draw.line(xy=(0, CELL_SIZE * i, IMG_SIZE, CELL_SIZE * i), fill="rgb(150, 150, 150)", width=1)
+
+#     for row in bboxes.itertuples(): # Draw bboxes
+#         draw.rectangle(
+#             xy=(row.x1, row.y1, row.x2, row.y2),
+#             outline="rgb(255, 0, 0)",
+#             fill=None,
+#             width=1,
+#         )
+#         draw.line(xy=(row.x1, row.y1, row.x2, row.y2), fill="rgb(255, 0, 0)", width=1)
+#         draw.line(xy=(row.x1, row.y2, row.x2, row.y1), fill="rgb(255, 0, 0)", width=1)
+#     return canvas
 
 
 def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
