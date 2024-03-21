@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 import config
 from utils import get_elapsed_time
 from model import YOLOv1
-from voc2012 import VOC2012Dataset
+from YOLO.data import VOC2012Dataset
 from loss import Yolov1Loss
 
 torch.manual_seed(config.SEED)

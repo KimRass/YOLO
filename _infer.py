@@ -6,7 +6,7 @@ from einops import rearrange
 
 import config
 from model import YOLOv1
-from voc2012 import VOC2012Dataset
+from YOLO.data import VOC2012Dataset
 
 torch.set_printoptions(linewidth=70)
 

@@ -1,9 +1,11 @@
-# References
+# References:
     # https://github.com/motokimura/yolo_v1_pytorch/blob/master/yolo_v1.py
+    # https://github.com/motokimura/yolo_v1_pytorch/blob/master/loss.py
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 LEAKY_RELU_SLOPE = 0.1
 
@@ -82,12 +84,25 @@ class Darknet(nn.Module):
 
 
 class YOLOv1(nn.Module):
-    def __init__(self, n_cells=7, n_bboxes=2, n_classes=20):
+    def __init__(
+            self,
+            img_size=448,
+            n_cells=7,
+            n_bboxes=2,
+            n_classes=20,
+            lamb_coord=5,
+            lamb_noobj=0.5,
+        ):
         super().__init__()
 
+        self.img_size = img_size
         self.n_cells = n_cells
         self.n_bboxes = n_bboxes
         self.n_classes = n_classes
+        self.lamb_coord = lamb_coord
+        self.lamb_noobj = lamb_noobj
+
+        self.cell_size = img_size // n_cells
 
         self.darknet = Darknet()
 
@@ -138,15 +153,111 @@ class YOLOv1(nn.Module):
         # "We use a linear activation function for the final layer and all other layers use
         # the leaky rectified linear activation."
 
-        print(x.shape)
         x = x.view(
             (-1, (5 * self.n_bboxes + self.n_classes), self.n_cells, self.n_cells),
         )
         return x
+
+    def decode(self, x):
+        bbox = x.clone()
+
+        bbox[:, (2, 7), ...] *= self.img_size # w
+        bbox[:, (3, 8), ...] *= self.img_size # h
+
+        bbox[:, (0, 5), ...] *= self.cell_size # x
+        bbox[:, (0, 5), ...] += torch.linspace(
+            0, self.img_size - self.cell_size, self.n_cells,
+        ).unsqueeze(0)
+        bbox[:, (1, 6), ...] *= self.cell_size # y
+        bbox[:, (1, 6), ...] += torch.linspace(
+            0, self.img_size - self.cell_size, self.n_cells,
+        ).unsqueeze(1)
+
+        x1 = (bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2).round()
+        y1 = (bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2).round()
+        x2 = (bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2).round()
+        y2 = (bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2).round()
+
+        bbox[:, (0, 5), ...] = x1
+        bbox[:, (1, 6), ...] = y1
+        bbox[:, (2, 7), ...] = x2
+        bbox[:, (3, 8), ...] = y2
+        bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...] = torch.clip(
+            bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...], min=0, max=self.img_size
+        )
+
+        bbox1 = torch.cat([bbox[:, : 5, ...], bbox[:, 10:, ...]], dim=1)
+        bbox1 = rearrange(bbox1, pattern="b c h w -> b (h w) c")
+
+        bbox2 = torch.cat([bbox[:, 5: 10, ...], bbox[:, 10:, ...]], dim=1)
+        bbox2 = rearrange(bbox2, pattern="b c h w -> b (h w) c")
+
+        bbox = torch.cat([bbox1, bbox2], dim=1)
+        return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
+
+    def get_loss(self, x, gt):
+        out = self(x)
+        pred = self.decode(out)
+
+        xy_indices = (0, 1, 5, 6)
+        wh_indices = (2, 3, 7, 8)
+        conf_indices = (4, 9)
+        cls_indices = range(10, 30)
+
+        b, _, _, _ = pred.shape
+
+        pred = pred.permute(0, 2, 3, 1)
+        gt = gt.permute(0, 2, 3, 1)
+
+        obj_mask = (gt[..., 4] == 1)
+        noobj_mask = (gt[..., 4] != 1)
+
+        obj_indices = obj_mask.nonzero(as_tuple=True)
+        noobj_indices = noobj_mask.nonzero(as_tuple=True)
+
+        ### Coordinate loss
+        pred_xy_obj = pred[..., xy_indices][obj_indices]
+        gt_xy_obj = gt[..., xy_indices][obj_indices]
+        # The 1st term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
+            # \bigg[ (x_{i} - \hat{x}_{i})^{2} + (y_{i} - \hat{y}_{i})^{2} \bigg]$$"
+        xy_loss = self.lamb_coord * F.mse_loss(pred_xy_obj, gt_xy_obj, reduction="mean")
+
+        pred_wh_obj = pred[..., wh_indices][obj_indices]
+        gt_wh_obj = gt[..., wh_indices][obj_indices]
+        # The 2nd term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
+            # \bigg[ (\sqrt{w_{i}} - \sqrt{\hat{w}_{i}})^{2} + (\sqrt{h_{i}} - \sqrt{\hat{h}_{i}})^{2} \bigg]$$"
+        wh_loss = self.lamb_coord * F.mse_loss(pred_wh_obj ** 0.5, gt_wh_obj ** 0.5)
+        coord_loss = xy_loss + wh_loss
+
+        ### Confidence loss
+        pred_conf_obj = pred[..., conf_indices][obj_indices]
+        gt_conf_obj = gt[..., conf_indices][obj_indices]
+        # The 3rd term; "$$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
+            # \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{i})^{2}$$"
+        conf_loss_obj = F.mse_loss(pred_conf_obj, gt_conf_obj)
+
+        pred_conf_noobj = pred[..., conf_indices][noobj_indices]
+        gt_conf_noobj = gt[..., conf_indices][noobj_indices]
+        # The 4th term; "$$\lambda_{noobj} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
+            # 1^{noobj}_{ij} \big( C_{i} - \hat{C}_{i} \big)^{2}$$"
+        conf_loss_noobj = self.lamb_noobj * F.mse_loss(pred_conf_noobj, gt_conf_noobj)
+
+        conf_loss = conf_loss_obj + conf_loss_noobj
+
+        ### Classification loss
+        pred_cls_obj = pred[..., cls_indices][obj_indices]
+        gt_cls_obj = gt[..., cls_indices][obj_indices]
+        # The 5th term; "$$\sum^{S^{2}}_{i = 0} \mathbb{1}^{obj}_{i} \sum_{c \in classes}\
+            # \big(p_{i}(c) - \hat{p}_{i}(c)\big)^{2}$$"
+        cls_loss = F.mse_loss(pred_cls_obj, gt_cls_obj)
+
+        loss = coord_loss + conf_loss + cls_loss
+        loss /= b
+        return loss
 
 
 if __name__ == "__main__":
     model = YOLOv1()
     x = torch.randn((4, 3, 448, 448))
     out = model(x)
-    out.shape
+    pred = model.decode(out)

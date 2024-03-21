@@ -9,42 +9,6 @@ from datetime import timedelta
 from einops import rearrange
 
 
-def decode(tensor, img_size=448, n_cells=7):
-    cell_size = img_size // n_cells
-
-    bbox = tensor.clone()
-
-    bbox[:, (2, 7), ...] *= img_size # w
-    bbox[:, (3, 8), ...] *= img_size # h
-
-    bbox[:, (0, 5), ...] *= cell_size # x
-    bbox[:, (0, 5), ...] += torch.linspace(0, img_size - cell_size, n_cells).unsqueeze(0)
-    bbox[:, (1, 6), ...] *= cell_size # y
-    bbox[:, (1, 6), ...] += torch.linspace(0, img_size - cell_size, n_cells).unsqueeze(1)
-
-    x1 = (bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2).round()
-    y1 = (bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2).round()
-    x2 = (bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2).round()
-    y2 = (bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2).round()
-
-    bbox[:, (0, 5), ...] = x1
-    bbox[:, (1, 6), ...] = y1
-    bbox[:, (2, 7), ...] = x2
-    bbox[:, (3, 8), ...] = y2
-    bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...] = torch.clip(
-        bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...], min=0, max=img_size
-    )
-
-    bbox1 = torch.cat([bbox[:, : 5, ...], bbox[:, 10:, ...]], dim=1)
-    bbox1 = rearrange(bbox1, pattern="b c h w -> b (h w) c")
-
-    bbox2 = torch.cat([bbox[:, 5: 10, ...], bbox[:, 10:, ...]], dim=1)
-    bbox2 = rearrange(bbox2, pattern="b c h w -> b (h w) c")
-
-    bbox = torch.cat([bbox1, bbox2], dim=1)
-    return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
-
-
 # import config
 
 # IMG_SIZE = 448
