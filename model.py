@@ -261,3 +261,5 @@ if __name__ == "__main__":
     x = torch.randn((4, 3, 448, 448))
     out = model(x)
     pred = model.decode(out)
+    pred.shape
+    pred[0, : 4, : 5]

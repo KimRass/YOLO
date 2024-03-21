@@ -9,6 +9,54 @@ from datetime import timedelta
 from einops import rearrange
 
 
+VOC_CLASSES = [
+    "aeroplane",
+    "bicycle",
+    "bird",
+    "boat",
+    "bottle",
+    "bus",
+    "car",
+    "cat",
+    "chair",
+    "cow",
+    "diningtable",
+    "dog",
+    "horse",
+    "motorbike",
+    "person",
+    "pottedplant",
+    "sheep",
+    "sofa",
+    "train",
+    "tvmonitor"
+]
+
+
+def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
+    data_dir = Path(data_dir)
+
+    sum_rgb = 0
+    sum_rgb_square = 0
+    sum_resol = 0
+    for img_path in tqdm(list(data_dir.glob(f"""**/*.{ext}"""))):
+        pil_img = Image.open(img_path)
+        tensor = T.ToTensor()(pil_img)
+        
+        sum_rgb += tensor.sum(dim=(1, 2))
+        sum_rgb_square += (tensor ** 2).sum(dim=(1, 2))
+        _, h, w = tensor.shape
+        sum_resol += h * w
+    mean = torch.round(sum_rgb / sum_resol, decimals=3)
+    std = torch.round((sum_rgb_square / sum_resol - mean ** 2) ** 0.5, decimals=3)
+    return mean, std
+
+
+def get_elapsed_time(start_time):
+    return timedelta(seconds=round(time() - start_time))
+
+
+
 # import config
 
 # IMG_SIZE = 448
@@ -36,28 +84,6 @@ from einops import rearrange
 #         draw.line(xy=(row.x1, row.y2, row.x2, row.y1), fill="rgb(255, 0, 0)", width=1)
 #     return canvas
 
-
-def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
-    data_dir = Path(data_dir)
-
-    sum_rgb = 0
-    sum_rgb_square = 0
-    sum_resol = 0
-    for img_path in tqdm(list(data_dir.glob(f"""**/*.{ext}"""))):
-        pil_img = Image.open(img_path)
-        tensor = T.ToTensor()(pil_img)
-        
-        sum_rgb += tensor.sum(dim=(1, 2))
-        sum_rgb_square += (tensor ** 2).sum(dim=(1, 2))
-        _, h, w = tensor.shape
-        sum_resol += h * w
-    mean = torch.round(sum_rgb / sum_resol, decimals=3)
-    std = torch.round((sum_rgb_square / sum_resol - mean ** 2) ** 0.5, decimals=3)
-    return mean, std
-
-
-def get_elapsed_time(start_time):
-    return timedelta(seconds=round(time() - start_time))
 
 
 # def draw_bboxes(image, bboxes):
