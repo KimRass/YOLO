@@ -18,84 +18,52 @@ from utils import VOC_CLASSES
 # draw_bboxes, get_image_dataset_mean_and_std
 
 
-def parse_xml_file(xml_path):
-    xtree = et.parse(xml_path)
-    xroot = xtree.getroot()
-
-    img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
-    image = Image.open(img_path).convert("RGB")
-
-    gt = torch.tensor(
-        [
-            (
-                round(float(bbox.find("bndbox").find("xmin").text)),
-                round(float(bbox.find("bndbox").find("ymin").text)),
-                round(float(bbox.find("bndbox").find("xmax").text)),
-                round(float(bbox.find("bndbox").find("ymax").text)),
-                VOC_CLASSES.index(xroot.find("object").find("name").text)
-            ) for bbox in xroot.findall("object")
-        ],
-        dtype=torch.float32,
-    )
-    # df_bboxes = pd.DataFrame([
-    #     (
-    #         round(float(bbox.find("bndbox").find("xmin").text)),
-    #         round(float(bbox.find("bndbox").find("ymin").text)),
-    #         round(float(bbox.find("bndbox").find("xmax").text)),
-    #         round(float(bbox.find("bndbox").find("ymax").text)),
-    #         VOC_CLASSES.index(xroot.find("object").find("name").text)
-    #     ) for bbox in xroot.findall("object")
-    # ], columns=("l", "t", "r", "b", "cls"))
-    # return image, df_bboxes
-    return image, gt
-
-
 class VOC2012Dataset(Dataset):
-    def __init__(self, annot_dir, img_size=448, n_cells=7, n_bboxes=2):
+    def __init__(self, annot_dir, img_size=448, n_cells=7, n_bboxes=2, augment=True):
         super().__init__()
 
         self.img_size = img_size
         self.n_cells = n_cells
         self.n_bboxes = n_bboxes
+        self.augment = augment
 
         self.cell_size = img_size // n_cells
 
         self.annots = list(Path(annot_dir).glob("*.xml"))
 
-    def _randomly_flip_horizontally(self, image, df_bboxes, p=0.5):
+    def _randomly_flip_horizontally(self, image, coord_gt, p=0.5):
         w, _ = image.size
         if random.random() > 1 - p:
             image = TF.hflip(image)
-            df_bboxes["l"], df_bboxes["r"] = w - df_bboxes["r"], w - df_bboxes["l"]
-        return image, df_bboxes
+            coord_gt[:, 0] = w - coord_gt[:, 0]
+            coord_gt[:, 2] = w - coord_gt[:, 2]
+        return image, coord_gt
 
     # "We introduce random scaling and translations of up to 20% of the original image size."
-    def _randomly_scale(self, image, df_bboxes, transform_ratio=0.2):
+    def _randomly_scale(self, image, coord_gt, transform_ratio=0.2):
         w, h = image.size
         scale = random.uniform(1 - transform_ratio, 1 + transform_ratio)
         image = TF.resize(image, size=(round(h * scale), round(w * scale)), antialias=True)
 
-        df_bboxes["l"] = df_bboxes["l"].apply(lambda x: round(x * scale))
-        df_bboxes["t"] = df_bboxes["t"].apply(lambda x: round(x * scale))
-        df_bboxes["r"] = df_bboxes["r"].apply(lambda x: round(x * scale))
-        df_bboxes["b"] = df_bboxes["b"].apply(lambda x: round(x * scale))
-        return image, df_bboxes
+        # coord_gt[:, : 4] = torch.round(coord_gt[:, : 4] * scale)
+        torch.round_(coord_gt * scale)
+        return image, coord_gt
 
-    def _randomly_shift(self, image, df_bboxes, ori_w, ori_h, transform_ratio=0.2):
+    def _randomly_shift(self, image, coord_gt, ori_w, ori_h, transform_ratio=0.2):
         dx = round(ori_w * random.uniform(-transform_ratio, transform_ratio))
         dy = round(ori_h * random.uniform(-transform_ratio, transform_ratio))
 
         image = TF.pad(image, padding=(dx, dy, -dx, -dy), padding_mode="constant")
 
-        df_bboxes["l"] += dx
-        df_bboxes["t"] += dy
-        df_bboxes["r"] += dx
-        df_bboxes["b"] += dy
+        coord_gt[:, 0] += dx
+        coord_gt[:, 1] += dy
+        coord_gt[:, 2] += dx
+        coord_gt[:, 3] += dy
 
         w, h = image.size
-        df_bboxes[["l", "r"]] = df_bboxes[["l", "r"]].clip(0, w)
-        df_bboxes[["t", "b"]] = df_bboxes[["t", "b"]].clip(0, h)
-        return image, df_bboxes
+        coord_gt[:, (0, 2)].clip_(0, w)
+        coord_gt[:, (0, 2)].clip_(0, h)
+        return image, coord_gt
 
     def _randomly_adjust_b_and_s(self, image):
         # We also randomly adjust the exposure and saturation of the image by up to a factor
@@ -104,92 +72,134 @@ class VOC2012Dataset(Dataset):
         image = TF.adjust_saturation(image, random.uniform(0.5, 1.5))
         return image
 
-    def _crop_center(self, image, df_bboxes):
+    def _crop_center(self, image, coord_gt):
         w, h = image.size
 
         image = TF.center_crop(image, output_size=self.img_size)
 
-        df_bboxes["l"] += (self.img_size - w) // 2
-        df_bboxes["t"] += (self.img_size - h) // 2
-        df_bboxes["r"] += (self.img_size - w) // 2
-        df_bboxes["b"] += (self.img_size - h) // 2
-        return image, df_bboxes
-
-    def _encode(self, df_bboxes):
-        if not df_bboxes.empty:
-            # "We parametrize the bounding box x and y coordinates to be offsets
-            # of a particular grid cell location so they are also bounded between 0 and 1."
-            df_bboxes["x"] = df_bboxes.apply(
-                lambda x: (((x["l"] + x["r"]) / 2) % self.cell_size) / self.cell_size,
-                axis=1
-            )
-            df_bboxes["y"] = df_bboxes.apply(
-                lambda x: (((x["t"] + x["b"]) / 2) % self.cell_size) / self.cell_size,
-                axis=1
-            )
-            # "We normalize the bounding box width and height by the image width and height
-            # so that they fall between 0 and 1."
-            df_bboxes["w"] = df_bboxes.apply(lambda x: (x["r"] - x["l"]) / self.img_size, axis=1)
-            df_bboxes["h"] = df_bboxes.apply(lambda x: (x["b"] - x["t"]) / self.img_size, axis=1)
-
-            df_bboxes["x_grid"] = df_bboxes.apply(
-                lambda x: int((x["l"] + x["r"]) / 2 / self.cell_size), axis=1
-            )
-            df_bboxes["y_grid"] = df_bboxes.apply(
-                lambda x: int((x["t"] + x["b"]) / 2 / self.cell_size), axis=1
-            )
-
-        gt = torch.zeros((30, self.n_cells, self.n_cells), dtype=torch.float)
-        for row in df_bboxes.itertuples():
-            gt[0, row.y_grid, row.x_grid] = row.x
-            gt[1, row.y_grid, row.x_grid] = row.y
-            gt[2, row.y_grid, row.x_grid] = row.w
-            gt[3, row.y_grid, row.x_grid] = row.h
-            gt[4, row.y_grid, row.x_grid] = 1
-            gt[5, row.y_grid, row.x_grid] = row.x
-            gt[6, row.y_grid, row.x_grid] = row.y
-            gt[7, row.y_grid, row.x_grid] = row.w
-            gt[8, row.y_grid, row.x_grid] = row.h
-            gt[9, row.y_grid, row.x_grid] = 1
-            gt[10 + row.cls, row.y_grid, row.x_grid] = 1
-        return gt
+        coord_gt[:, (0, 2)] += (self.img_size - w) // 2 
+        coord_gt[:, (1, 3)] += (self.img_size - h) // 2 
+        return image, coord_gt
 
     def __len__(self):
         return len(self.annots)
 
+    @staticmethod
+    def parse_xml_file(xml_path):
+        # xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000027.xml"
+        xtree = et.parse(xml_path)
+        xroot = xtree.getroot()
+
+        img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
+        image = Image.open(img_path).convert("RGB")
+
+        coord_gt = torch.tensor(
+            [
+                (
+                    round(float(bbox.find("bndbox").find("xmin").text)),
+                    round(float(bbox.find("bndbox").find("ymin").text)),
+                    round(float(bbox.find("bndbox").find("xmax").text)),
+                    round(float(bbox.find("bndbox").find("ymax").text)),
+                ) for bbox in xroot.findall("object")
+            ],
+            dtype=torch.int32,
+        )
+        cls_gt = torch.tensor(
+            [
+                VOC_CLASSES.index(xroot.find("object").find("name").text)
+                for _
+                in xroot.findall("object")
+            ],
+            dtype=torch.int32,
+        )
+        return image, coord_gt, cls_gt
+
     def __getitem__(self, idx):
         xml_path = self.annots[idx]
-        image, df_bboxes = parse_xml_file(xml_path)
+        image, coord_gt, cls_gt = self.parse_xml_file(xml_path)
         ori_w, ori_h = image.size
 
-        image, df_bboxes = self._randomly_flip_horizontally(image=image, df_bboxes=df_bboxes)
-        image, df_bboxes = self._randomly_shift(
-            image=image, df_bboxes=df_bboxes, ori_w=ori_w, ori_h=ori_h
-        )
-        image, df_bboxes = self._randomly_scale(image=image, df_bboxes=df_bboxes)
-        image = self._randomly_adjust_b_and_s(image)
-        image, df_bboxes = self._crop_center(image=image, df_bboxes=df_bboxes)
+        if self.augment:
+            image, coord_gt = self._randomly_flip_horizontally(image=image, coord_gt=coord_gt)
+            image, coord_gt = self._randomly_shift(
+                image=image, coord_gt=coord_gt, ori_w=ori_w, ori_h=ori_h
+            )
+            image, coord_gt = self._randomly_scale(image=image, coord_gt=coord_gt)
+            image = self._randomly_adjust_b_and_s(image)
+            image, coord_gt = self._crop_center(image=image, coord_gt=coord_gt)
+        coord_gt = coord_gt.clip_(0, self.img_size)
 
         image = TF.to_tensor(image)
         # get_image_dataset_mean_and_std
         image = TF.normalize(image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284))
-        # image = TF.normalize(image, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-
-        df_bboxes[["l", "t", "r", "b"]] = df_bboxes[["l", "t", "r", "b"]].clip(0, self.img_size)
-        df_bboxes = df_bboxes[(df_bboxes["l"] != df_bboxes["r"]) & (df_bboxes["t"] != df_bboxes["b"])]
-        return image, df_bboxes
-        # gt = self._encode(df_bboxes)
+        return image, coord_gt, cls_gt
+        # gt = self._encode(gt)
         # return image, gt
 
 
-if __name__ == "__main__":
-    ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations")
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
-    di = iter(dl)
-    image, gt = next(di)
-    image
-    gt.shape
+class DynamicPadding(object):
+    def __call__(self, batch):
+        images = list()
+        coord_gts = list()
+        cls_gts = list()
+        max_n_objs = 0
+        for image, coord_gt, cls_gt in batch:
+            images.append(image)
+            coord_gts.append(coord_gt)
+            cls_gts.append(cls_gt)
 
-    # xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000027.xml"
-    # parse_xml_file(xml_path)
-104/255
+            n_objs = coord_gt.size(0)
+            if n_objs > max_n_objs:
+                max_n_objs = n_objs
+
+        image = torch.stack(images)
+        coord_gt = torch.stack(
+            [
+                torch.cat(
+                    [
+                        coord_gt,
+                        # torch.full(
+                        #     size=(max_n_objs - coord_gt.size(0), 4),
+                        #     fill_value=len(VOC_CLASSES),
+                        #     dtype=torch.int32,
+                        # )
+                        torch.zeros(
+                            size=(max_n_objs - coord_gt.size(0), 4), dtype=torch.int32,
+                        ),
+                    ],
+                    dim=0,
+                )
+                for coord_gt
+                in coord_gts
+            ]
+        )
+        cls_gt = torch.stack(
+            [
+                torch.cat(
+                    [
+                        cls_gt,
+                        torch.full(
+                            size=(max_n_objs - cls_gt.size(0),),
+                            fill_value=len(VOC_CLASSES),
+                            dtype=torch.int32,
+                        )
+                    ],
+                    dim=0,
+                )
+                for cls_gt
+                in cls_gts
+            ]
+        )
+        return image, coord_gt, cls_gt
+
+
+if __name__ == "__main__":
+    ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations", augment=True)
+    # image, coord_gt, cls_gt = ds[100]
+
+    dl = DataLoader(ds, batch_size=4, num_workers=0, pin_memory=True, drop_last=True, collate_fn=DynamicPadding())
+    di = iter(dl)
+    image, coord_gt, cls_gt = next(di)
+    # coord_gt.shape, cls_gt.shape
+    coord_gt
+    cls_gt

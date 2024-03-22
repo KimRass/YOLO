@@ -158,6 +158,59 @@ class YOLOv1(nn.Module):
         )
         return x
 
+    def _encode(self, coord_gt, cls_gt):
+        cell_size = 64
+        img_size=448
+        # a = (((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2) % cell_size) / cell_size
+        # b = (((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2) % cell_size) / cell_size
+        # c = (coord_gt[:, :, 2] - coord_gt[:, :, 0]) / img_size
+        # d = (coord_gt[:, :, 3] - coord_gt[:, :, 1]) / img_size
+        # torch.cat([a, b, c, d], dim=2)
+
+    def _encode(self, coord_gt, cls_gt):
+        cell_size = 64
+        img_size=448
+        coord_gt[:, :, 4]
+        a = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
+        b = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
+        appears[(a, b)]
+        
+        coord_gt[0]
+        cls_gt != 20
+        
+        for idx in range(coord_gt.size(0)):
+            # idx = 1
+            cls_gt[idx] != 20
+            coord_gt2 = coord_gt[idx][cls_gt[idx] != 20]
+            a = ((coord_gt2[ :, 0] + coord_gt2[:, 2]) / 2 // cell_size).long()
+            b = ((coord_gt2[ :, 1] + coord_gt2[:, 3]) / 2 // cell_size).long()
+            appears = torch.zeros(size=(7, 7))
+            torch.index_select(appears, dim=0, indices=a)
+            
+        
+        # "We parametrize the bounding box x and y coordinates to be offsets
+        # of a particular grid cell location so they are also bounded between 0 and 1."
+        gt["x"] = gt.apply(
+            lambda x: (((x["l"] + x["r"]) / 2) % self.cell_size) / self.cell_size,
+            axis=1
+        )
+        gt["y"] = gt.apply(
+            lambda x: (((x["t"] + x["b"]) / 2) % self.cell_size) / self.cell_size,
+            axis=1
+        )
+        # "We normalize the bounding box width and height by the image width and height
+        # so that they fall between 0 and 1."
+        gt["w"] = gt.apply(lambda x: (x["r"] - x["l"]) / self.img_size, axis=1)
+        gt["h"] = gt.apply(lambda x: (x["b"] - x["t"]) / self.img_size, axis=1)
+
+        gt["x_grid"] = gt.apply(
+            lambda x: int((x["l"] + x["r"]) / 2 / self.cell_size), axis=1
+        )
+        gt["y_grid"] = gt.apply(
+            lambda x: int((x["t"] + x["b"]) / 2 / self.cell_size), axis=1
+        )
+        return gt
+
     def decode(self, x):
         bbox = x.clone()
 
@@ -218,28 +271,20 @@ class YOLOv1(nn.Module):
         ### Coordinate loss
         pred_xy_obj = pred[..., xy_indices][obj_indices]
         gt_xy_obj = gt[..., xy_indices][obj_indices]
-        # The 1st term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
-            # \bigg[ (x_{i} - \hat{x}_{i})^{2} + (y_{i} - \hat{y}_{i})^{2} \bigg]$$"
         xy_loss = self.lamb_coord * F.mse_loss(pred_xy_obj, gt_xy_obj, reduction="mean")
 
         pred_wh_obj = pred[..., wh_indices][obj_indices]
         gt_wh_obj = gt[..., wh_indices][obj_indices]
-        # The 2nd term; "$$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij}\
-            # \bigg[ (\sqrt{w_{i}} - \sqrt{\hat{w}_{i}})^{2} + (\sqrt{h_{i}} - \sqrt{\hat{h}_{i}})^{2} \bigg]$$"
         wh_loss = self.lamb_coord * F.mse_loss(pred_wh_obj ** 0.5, gt_wh_obj ** 0.5)
         coord_loss = xy_loss + wh_loss
 
         ### Confidence loss
         pred_conf_obj = pred[..., conf_indices][obj_indices]
         gt_conf_obj = gt[..., conf_indices][obj_indices]
-        # The 3rd term; "$$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
-            # \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{i})^{2}$$"
         conf_loss_obj = F.mse_loss(pred_conf_obj, gt_conf_obj)
 
         pred_conf_noobj = pred[..., conf_indices][noobj_indices]
         gt_conf_noobj = gt[..., conf_indices][noobj_indices]
-        # The 4th term; "$$\lambda_{noobj} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0}\
-            # 1^{noobj}_{ij} \big( C_{i} - \hat{C}_{i} \big)^{2}$$"
         conf_loss_noobj = self.lamb_noobj * F.mse_loss(pred_conf_noobj, gt_conf_noobj)
 
         conf_loss = conf_loss_obj + conf_loss_noobj
@@ -247,8 +292,6 @@ class YOLOv1(nn.Module):
         ### Classification loss
         pred_cls_obj = pred[..., cls_indices][obj_indices]
         gt_cls_obj = gt[..., cls_indices][obj_indices]
-        # The 5th term; "$$\sum^{S^{2}}_{i = 0} \mathbb{1}^{obj}_{i} \sum_{c \in classes}\
-            # \big(p_{i}(c) - \hat{p}_{i}(c)\big)^{2}$$"
         cls_loss = F.mse_loss(pred_cls_obj, gt_cls_obj)
 
         loss = coord_loss + conf_loss + cls_loss
@@ -262,4 +305,5 @@ if __name__ == "__main__":
     out = model(x)
     pred = model.decode(out)
     pred.shape
+    gt.shape
     pred[0, : 4, : 5]
