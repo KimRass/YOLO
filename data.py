@@ -192,3 +192,4 @@ if __name__ == "__main__":
 
     # xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000027.xml"
     # parse_xml_file(xml_path)
+104/255
