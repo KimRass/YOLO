@@ -28,6 +28,13 @@ def get_intersection_area(bbox1, bbox2):
 
 
 def get_iou(bbox1, bbox2):
+    """
+    args:
+        bbox1: [N, 4]
+        bbox2: [M, 4]
+    returns:
+        [N, M]
+    """
     bbox1_area = get_area(bbox1)
     bbox2_area = get_area(bbox2)
     intersec_area = get_intersection_area(bbox1, bbox2)

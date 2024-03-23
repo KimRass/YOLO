@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+from eval import get_iou
+
 LEAKY_RELU_SLOPE = 0.1
 
 
@@ -158,35 +160,57 @@ class YOLOv1(nn.Module):
         )
         return x
 
-    def _encode(self, coord_gt, cls_gt):
+    # def get_obj_mask(coord_gt, cls_gt):
+    #     cell_size = 64
+    #     batch_size = cls_gt.size(0)
+    #     x_idx = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
+    #     y_idx = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
+    #     appears = torch.zeros(size=(batch_size, 7, 7), dtype=torch.bool)
+    #     for batch_idx in range(batch_size):
+    #         for bbox_idx in range(cls_gt.size(1)):
+    #             cls_idx = cls_gt[batch_idx, bbox_idx].item()
+    #             if cls_idx != 20:
+    #                 appears[batch_idx, x_idx[batch_idx, bbox_idx], y_idx[batch_idx, bbox_idx]] = True
+    #     return appears
+
+    def get_obj_mask(coord_gt, cls_gt):
+        n_cells=7
         cell_size = 64
-        img_size=448
-        # a = (((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2) % cell_size) / cell_size
-        # b = (((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2) % cell_size) / cell_size
-        # c = (coord_gt[:, :, 2] - coord_gt[:, :, 0]) / img_size
-        # d = (coord_gt[:, :, 3] - coord_gt[:, :, 1]) / img_size
-        # torch.cat([a, b, c, d], dim=2)
+        batch_size = cls_gt.size(0)
+        x_idx = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
+        y_idx = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
+        
+        appears = torch.zeros(size=(batch_size, (n_cells ** 2) * 2), dtype=torch.bool)
+        idx = (x_idx * n_cells + y_idx)
+        appears[
+            torch.arange(batch_size).repeat_interleave(cls_gt.size(1))[(cls_gt != 20).view(-1)],
+            idx.view(-1)[(cls_gt != 20).view(-1)],
+        ] = 1
+        appears[
+            torch.arange(batch_size).repeat_interleave(cls_gt.size(1))[(cls_gt != 20).view(-1)],
+            idx.view(-1)[(cls_gt != 20).view(-1)] + n_cells ** 2,
+        ] = 1
+        return appears
+
+    # def _encode(self, coord_gt, cls_gt):
+    #     img_size=448
+    #     # a = (((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2) % cell_size) / cell_size
+    #     # b = (((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2) % cell_size) / cell_size
+    #     # c = (coord_gt[:, :, 2] - coord_gt[:, :, 0]) / img_size
+    #     # d = (coord_gt[:, :, 3] - coord_gt[:, :, 1]) / img_size
+    #     # torch.cat([a, b, c, d], dim=2)
 
     def _encode(self, coord_gt, cls_gt):
         cell_size = 64
         img_size=448
-        coord_gt[:, :, 4]
-        a = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
-        b = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
-        appears[(a, b)]
-        
-        coord_gt[0]
-        cls_gt != 20
-        
-        for idx in range(coord_gt.size(0)):
-            # idx = 1
-            cls_gt[idx] != 20
-            coord_gt2 = coord_gt[idx][cls_gt[idx] != 20]
-            a = ((coord_gt2[ :, 0] + coord_gt2[:, 2]) / 2 // cell_size).long()
-            b = ((coord_gt2[ :, 1] + coord_gt2[:, 3]) / 2 // cell_size).long()
-            appears = torch.zeros(size=(7, 7))
-            torch.index_select(appears, dim=0, indices=a)
-            
+        obj_mask = get_obj_mask(coord_gt, cls_gt)
+        coord_pred[obj_mask].shape
+        obj_mask
+        coord_gt
+        cls_gt
+        obj_ms
+
+
         
         # "We parametrize the bounding box x and y coordinates to be offsets
         # of a particular grid cell location so they are also bounded between 0 and 1."
@@ -212,29 +236,30 @@ class YOLOv1(nn.Module):
         return gt
 
     def decode(self, x):
+        # x = out
         bbox = x.clone()
 
         bbox[:, (2, 7), ...] *= self.img_size # w
         bbox[:, (3, 8), ...] *= self.img_size # h
-
         bbox[:, (0, 5), ...] *= self.cell_size # x
         bbox[:, (0, 5), ...] += torch.linspace(
             0, self.img_size - self.cell_size, self.n_cells,
-        ).unsqueeze(0)
+        ).unsqueeze(0) # x
         bbox[:, (1, 6), ...] *= self.cell_size # y
         bbox[:, (1, 6), ...] += torch.linspace(
             0, self.img_size - self.cell_size, self.n_cells,
-        ).unsqueeze(1)
+        ).unsqueeze(1) # y
 
-        x1 = (bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2).round()
-        y1 = (bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2).round()
-        x2 = (bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2).round()
-        y2 = (bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2).round()
+        l = bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2
+        t = bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2
+        r = bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2
+        b = bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2
 
-        bbox[:, (0, 5), ...] = x1
-        bbox[:, (1, 6), ...] = y1
-        bbox[:, (2, 7), ...] = x2
-        bbox[:, (3, 8), ...] = y2
+        bbox[:, (0, 5), ...] = l
+        bbox[:, (1, 6), ...] = t
+        bbox[:, (2, 7), ...] = r
+        bbox[:, (3, 8), ...] = b
+
         bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...] = torch.clip(
             bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...], min=0, max=self.img_size
         )
@@ -246,11 +271,30 @@ class YOLOv1(nn.Module):
         bbox2 = rearrange(bbox2, pattern="b c h w -> b (h w) c")
 
         bbox = torch.cat([bbox1, bbox2], dim=1)
-        return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
+        # return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
+        return bbox[..., : 4], bbox[..., 4], bbox[..., 5:]
 
-    def get_loss(self, x, gt):
-        out = self(x)
-        pred = self.decode(out)
+    def get_loss(self, x, coord_gt, cls_gt):
+        # out = self(x)
+        # pred = self.decode(out)
+        cell_size=448//7
+        n_cells=7
+        obj_mask = get_obj_mask(coord_gt, cls_gt)
+        
+
+
+        # conf_order = torch.argsort(conf_pred[..., None].repeat(1, 1, 4), dim=1)
+        conf_order = torch.argsort(conf_pred, dim=1)
+        sorted_coord_pred = torch.gather(coord_pred, dim=1, index=conf_order[..., None].repeat(1, 1, 4))
+        # coord_pred.shape, sorted_coord_pred.shape
+        for batch_idx in range(4):
+            batch_idx=2
+            iou = get_iou(coord_gt[batch_idx], sorted_coord_pred[batch_idx])
+            iou.shape
+        
+
+
+
 
         xy_indices = (0, 1, 5, 6)
         wh_indices = (2, 3, 7, 8)
@@ -303,7 +347,9 @@ if __name__ == "__main__":
     model = YOLOv1()
     x = torch.randn((4, 3, 448, 448))
     out = model(x)
-    pred = model.decode(out)
-    pred.shape
-    gt.shape
-    pred[0, : 4, : 5]
+    # out.shape
+    coord_pred, conf_pred, cls_pred = model.decode(out)
+    coord_pred.shape
+    cls_pred
+    # pred.shape
+    # pred[0, : 4, : 5]

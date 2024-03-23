@@ -12,6 +12,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 import random
+from collections import defaultdict
 
 # import config
 from utils import VOC_CLASSES
@@ -45,7 +46,6 @@ class VOC2012Dataset(Dataset):
         scale = random.uniform(1 - transform_ratio, 1 + transform_ratio)
         image = TF.resize(image, size=(round(h * scale), round(w * scale)), antialias=True)
 
-        # coord_gt[:, : 4] = torch.round(coord_gt[:, : 4] * scale)
         torch.round_(coord_gt * scale)
         return image, coord_gt
 
@@ -120,6 +120,7 @@ class VOC2012Dataset(Dataset):
         ori_w, ori_h = image.size
 
         if self.augment:
+            # print(coord_gt.shape)
             image, coord_gt = self._randomly_flip_horizontally(image=image, coord_gt=coord_gt)
             image, coord_gt = self._randomly_shift(
                 image=image, coord_gt=coord_gt, ori_w=ori_w, ori_h=ori_h
@@ -193,13 +194,82 @@ class DynamicPadding(object):
         return image, coord_gt, cls_gt
 
 
+def ltrb_to_xywh(ltrb):
+    return torch.stack(
+        [
+            (ltrb[:, 0] + ltrb[:, 2]) // 2,
+            (ltrb[:, 1] + ltrb[:, 3]) // 2,
+            ltrb[:, 2] - ltrb[:, 0],
+            ltrb[:, 3] - ltrb[:, 1],
+        ],
+        dim=1,
+    )
+
+
+def xy_to_cell_idx(xy):
+    return xy // 64
+
+
+def cell_idx_to_mask(cell_idx):
+    mask = torch.zeros(size=(7, 7), dtype=torch.bool)
+    mask[cell_idx[:, 0], cell_idx[:, 1]] = True
+    return mask
+
+
+def normalize_xywh(xywh):
+    img_size = 448
+    norm_xywh = xywh.clone().float()
+    norm_xywh[:, 0] = norm_xywh[:, 0] % cell_size / cell_size
+    norm_xywh[:, 1] = norm_xywh[:, 1] % cell_size / cell_size
+    norm_xywh[:, 2] /= img_size
+    norm_xywh[:, 3] /= img_size
+    return norm_xywh
+
+
+def cell_idx_to_row_idx(cell_idx):
+    return cell_idx[:, 0] * n_cells + cell_idx[:, 1]
+
+
+def get_nonduplicate_indices(row_idx, n_bbox_per_cell=1):
+    cnts = defaultdict(int)
+    valid_indices = list()
+    for idx in range(row_idx.size(0)):
+        row = row_idx[idx].item()
+        if cnts[row] < n_bbox_per_cell:
+            valid_indices.append(idx)
+        cnts[row] += 1
+    return valid_indices
+
+
 if __name__ == "__main__":
-    ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations", augment=True)
-    # image, coord_gt, cls_gt = ds[100]
+    ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations", augment=False)
+    cell_size = 64
+    n_cells= 7
+    n_bbox_per_cell = 1
+    for i in range(10000):
+        image, ltrb_gt, cls_gt = ds[i]
+        gt_xywh = ltrb_to_xywh(ltrb_gt)
+        cell_idx = xy_to_cell_idx(gt_xywh[:, : 2])
+        if cell_idx.size(0) != torch.unique(cell_idx, dim=0).size(0):
+            break
+
+    row_idx = cell_idx_to_row_idx(cell_idx)
+    valid_indices = get_nonduplicate_indices(row_idx)
+    dedup_row_idx = row_idx[valid_indices]
+    dedup_gt_xywh = gt_xywh[valid_indices]
+    dedup_norm_xywh = normalize_xywh(dedup_gt_xywh)
+    dedup_cls_gt = cls_gt[valid_indices]
+    # mask = cell_idx_to_mask(cell_idx)
+    dedup_row_idx.size(0)
+    
+    row_idx_mask = torch.full(size=((n_cells ** 2) * n_bbox_per_cell,), fill_value=(n_cells ** 2) * n_bbox_per_cell)
+    row_idx_mask[dedup_row_idx] = torch.arange(dedup_row_idx.size(0))
+    row_idx_mask
+            
 
     dl = DataLoader(ds, batch_size=4, num_workers=0, pin_memory=True, drop_last=True, collate_fn=DynamicPadding())
     di = iter(dl)
     image, coord_gt, cls_gt = next(di)
     # coord_gt.shape, cls_gt.shape
-    coord_gt
+    coord_gt.shape
     cls_gt
