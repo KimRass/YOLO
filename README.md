@@ -7,8 +7,8 @@ $$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij} \b
 \\+ \lambda_{noobj} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} 1^{noobj}_{ij} \big(C_{i} - \hat{C}_{i}\big)^{2}$$
 - $\mathbb{1}^{obj}_{i}$: ***Denotes if object appears in cell*** $i$
 - $\mathbb{1}^{obj}_{ij}$: ***Denotes that the*** $j$ th ***bounding box predictor in cell*** $i$ ***is "responsible" for that prediction.***
-- (Comment: $\mathbb{1}^{noobj}_{ij}$: $\mathbb{1}^{obj}_{ij}$가 0일 때 1을 가지며 그 반대의 경우도 마찬가지입니다.)
-- (위 loss의 수식에서 $j$가 빠져있는데, $j$는 각 그리드 셀마다 $B$개의 predictors 중에서 confidence가 가장 높은 것으로 선택됩니다.)
+<!-- - (Comment: $\mathbb{1}^{noobj}_{ij}$: $\mathbb{1}^{obj}_{ij}$가 0일 때 1을 가지며 그 반대의 경우도 마찬가지입니다.) -->
+<!-- - (위 loss의 수식에서 $j$가 빠져있는데, $j$는 각 그리드 셀마다 $B$개의 predictors 중에서 confidence가 가장 높은 것으로 선택됩니다.) -->
 
 $$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij} \bigg[ (x_{i} - \hat{x}_{i})^{2} + (y_{i} - \hat{y}_{i})^{2} \bigg]$$
 $$\lambda_{coord} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij} \bigg[ (\sqrt{w_{i}} - \sqrt{\hat{w}_{i}})^{2} + (\sqrt{h_{i}} - \sqrt{\hat{h}_{i}})^{2} \bigg]$$
