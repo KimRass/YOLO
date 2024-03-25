@@ -9,40 +9,34 @@ from PIL import Image, ImageDraw
 import pandas as pd
 from pathlib import Path
 
-from loss import get_whether_each_predictor_is_responsible
-from parepare_voc2012 import (
-    parse_voc2012_xml_file,
-    Transform,
-    _normalize_bboxes_coordinates,
-    VOC2012Dataset
-)
-from image_utils import (
-    _to_array,
-    _to_pil,
-    _blend_two_images,
-    save_image,
-    _get_canvas_same_size_as_image,
-    draw_bboxes
+from utils import (
+    VOC_CLASSES,
+    get_canvas_same_size_as_img,
+    blend,
 )
 
-
-
-
-
-
-
-
-
-
-voc_classes = [
-    "background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"
-]
-
-rgb_vals = [0, 128, 255]
-colors = tuple(product(rgb_vals, rgb_vals, rgb_vals))
-palette = colors[0: 1] + colors[7:]
-
-class2color = {palette.index(color): color for color in palette}
+COLORS = (
+    (230, 25, 75),
+    (60, 180, 75),
+    (255, 255, 25),
+    (0, 130, 200),
+    (245, 130, 48),
+    (145, 30, 180),
+    (70, 240, 250),
+    (240, 50, 230),
+    (210, 255, 60),
+    (250, 190, 212),
+    (0, 128, 128),
+    (220, 190, 255),
+    (170, 110, 40),
+    (255, 250, 200),
+    (128, 0, 0),
+    (170, 255, 195),
+    (128, 128, 0),
+    (255, 215, 180),
+    (0, 0, 128),
+    (128, 128, 128),
+)
 
 
 def denormalize_array(img, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
@@ -82,7 +76,7 @@ def visualize_class_probability_maps(class_prob_maps, image, idx=0):
         resized[64 * k - 1: 64 * k + 1, :, :] = (0, 0, 0)
     for k in range(7):
         resized[:, 64 * k - 1: 64 * k + 1, :] = (0, 0, 0)
-    blended = _blend_two_images(img1=img, img2=resized, alpha=0.7)
+    blended = blend(img1=img, img2=resized, alpha=0.7)
     return blended
 
 
@@ -130,24 +124,51 @@ def batched_image_to_grid(image, n_cols, normalize=False, mean=(0.485, 0.456, 0.
     return grid
 
 
-def draw_grids_and_bounding_boxes(img, bboxes, img_size=448, n_cells=7):
-    # copied = img.copy()
+# def draw_grids_and_bboxes(img, bboxes, img_size=448, n_cells=7):
+#     # copied = img.copy()
+#     canvas = get_canvas_same_size_as_img(img=img, black=True)
+#     for i in range(1, n_cells):
+#         val = img_size // n_cells * i
+#         cv2.line(img=canvas, pt1=(val, 0), pt2=(val, img_size), color=(255, 255, 255), thickness=1)
+#         cv2.line(img=canvas, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
 
-    canvas = _get_canvas_same_size_as_image(img=img, black=True)
+#     blended = blend(img1=img, img2=canvas, alpha=0.2)
+
+#     for tup in bboxes[["x1", "y1", "x2", "y2", "label"]].itertuples():
+#         _, x1, y1, x2, y2, label = tup
+
+#         cv2.rectangle(img=blended, pt1=(x1, y1), pt2=(x2, y2), color=COLORS[label], thickness=2)
+#         cv2.line(img=blended, pt1=(x1, y1), pt2=(x2, y2), color=COLORS[label], thickness=1)
+#         cv2.line(img=blended, pt1=(x1, y2), pt2=(x2, y1), color=COLORS[label], thickness=1)
+#     return blended
+
+
+def draw_grids_and_bboxes(image, ltrb, cls_idx, img_size=448, n_cells=7, alpha=0.2):
+    # copied = img.copy()
+    # img_size=448
+    img = np.array(image)
+    overlay = img.copy()
     for i in range(1, n_cells):
         val = img_size // n_cells * i
-        cv2.line(img=canvas, pt1=(val, 0), pt2=(val, img_size), color=(255, 255, 255), thickness=1)
-        cv2.line(img=canvas, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
+        cv2.line(img=overlay, pt1=(val, 0), pt2=(val, img_size), color=(255, 255, 255), thickness=1)
+        cv2.line(img=overlay, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
-    blended = _blend_two_images(img1=img, img2=canvas, alpha=0.2)
-
-    for tup in bboxes[["x1", "y1", "x2", "y2", "label"]].itertuples():
-        _, x1, y1, x2, y2, label = tup
-
-        cv2.rectangle(img=blended, pt1=(x1, y1), pt2=(x2, y2), color=class2color[label], thickness=2)
-        cv2.line(img=blended, pt1=(x1, y1), pt2=(x2, y2), color=class2color[label], thickness=1)
-        cv2.line(img=blended, pt1=(x1, y2), pt2=(x2, y1), color=class2color[label], thickness=1)
-    return blended
+    for (l, t, r, b), cls_idx in zip(ltrb, cls_idx):
+        l = l.item()
+        t = t.item()
+        r = r.item()
+        b = b.item()
+        cls_idx = cls_idx.item()
+        cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=1)
+        cv2.circle(
+            img=img,
+            center=((l + r) // 2, (t + b) // 2),
+            radius=1,
+            color=COLORS[cls_idx],
+            thickness=2,
+        )
+    return img
 
 
 if __name__ == "__main__":
@@ -163,7 +184,7 @@ if __name__ == "__main__":
         bboxes = _normalize_bboxes_coordinates(bboxes=bboxes, img=img)
         img = _tensor_to_array(transform(_to_pil(img)))
 
-        dr = draw_grids_and_bounding_boxes(img, bboxes)
+        dr = draw_grids_and_bboxes(img, bboxes)
         show_image(dr)
         save_image(img=dr, path=f"""/Users/jongbeomkim/Desktop/workspace/segmentation_and_detection/yolo/ground_truths/{xml_path.stem}.jpg""")
     

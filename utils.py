@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 from time import time
 from datetime import timedelta
 from einops import rearrange
+import numpy as np
 
 
 VOC_CLASSES = [
@@ -103,39 +104,39 @@ def get_elapsed_time(start_time):
 #     return img
 
 
-# def _to_pil(img):
-#     if not isinstance(img, Image.Image):
-#         img = Image.fromarray(img)
-#     return img
+def to_pil(img):
+    if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+    return img
 
 
-# def _to_array(img):
-#     img = np.array(img)
-#     return img
+def to_array(img):
+    img = np.array(img)
+    return img
 
 
-# def _blend_two_images(img1, img2, alpha=0.5):
-#     img1 = _to_pil(img1)
-#     img2 = _to_pil(img2)
-#     img_blended = Image.blend(im1=img1, im2=img2, alpha=alpha)
-#     return _to_array(img_blended)
+def blend(img1, img2, alpha=0.5):
+    img1 = to_pil(img1)
+    img2 = to_pil(img2)
+    img_blended = Image.blend(im1=img1, im2=img2, alpha=alpha)
+    return to_array(img_blended)
 
 
 # def show_image(img):
 #     copied_img = img.copy()
-#     copied_img = _to_pil(copied_img)
+#     copied_img = to_pil(copied_img)
 #     copied_img.show()
 
 
 # def save_image(img, path):
-#     _to_pil(img).save(str(path))
+#     to_pil(img).save(str(path))
 
 
-# def _get_canvas_same_size_as_image(img, black=False):
-#     if black:
-#         return np.zeros_like(img).astype("uint8")
-#     else:
-#         return (np.ones_like(img) * 255).astype("uint8")
+def get_canvas_same_size_as_img(img, black=False):
+    if black:
+        return np.zeros_like(img).astype("uint8")
+    else:
+        return (np.ones_like(img) * 255).astype("uint8")
 
 
 # def _get_width_and_height(img):
@@ -146,7 +147,7 @@ def get_elapsed_time(start_time):
 #     return w, h
 
 
-# def _batched_tensor_to_array(image, idx=0, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+# def _batched_tensorto_array(image, idx=0, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
 #     img = image.clone()[idx].permute((1, 2, 0)).detach().cpu().numpy()
 #     img *= std
 #     img += mean
@@ -156,8 +157,8 @@ def get_elapsed_time(start_time):
 
 
 # def draw_bboxes(image, bboxes, idx):
-#     img = _batched_tensor_to_array(image=image, idx=idx)
-#     canvas = _to_pil(img)
+#     img = _batched_tensorto_array(image=image, idx=idx)
+#     canvas = to_pil(img)
 #     draw = ImageDraw.Draw(canvas)
 
 #     for x, y, w, h, c in bboxes.CELL_SIZE * iues:
@@ -167,7 +168,7 @@ def get_elapsed_time(start_time):
 #             fill=None,
 #             width=int(c * 5)
 #         )
-#     canvas = _to_array(canvas)
+#     canvas = to_array(canvas)
 #     return canvas
 
 
@@ -177,7 +178,7 @@ def get_elapsed_time(start_time):
 
 
 # def draw_bboxes(img, bboxes):
-#     img_pil = _to_pil(img)
+#     img_pil = to_pil(img)
 #     draw = ImageDraw.Draw(img_pil)
 #     for x1, y1, x2, y2 in bboxes[["x1", "y1", "x2", "y2"]].CELL_SIZE * iues:
 #         draw.rectangle(
@@ -186,7 +187,7 @@ def get_elapsed_time(start_time):
 #             fill=None,
 #             width=2
 #         )
-#     return _to_array(img_pil)
+#     return to_array(img_pil)
 
 
 # def exract_all_colors_from_segmentation_map(seg_map):
@@ -194,7 +195,7 @@ def get_elapsed_time(start_time):
 #     colors = [
 #         color
 #         for color, _
-#         in extcolors.extract_from_image(img=_to_pil(seg_map), tolerance=0, limit=w * h)[0]
+#         in extcolors.extract_from_image(img=to_pil(seg_map), tolerance=0, limit=w * h)[0]
 #     ]
 #     return colors
 

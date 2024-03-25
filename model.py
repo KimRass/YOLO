@@ -92,8 +92,8 @@ class YOLOv1(nn.Module):
             n_cells=7,
             n_bboxes=2,
             n_classes=20,
-            lamb_coord=5,
-            lamb_noobj=0.5,
+            coord_coeff=5,
+            noobj_coeff=0.5,
         ):
         super().__init__()
 
@@ -101,8 +101,8 @@ class YOLOv1(nn.Module):
         self.n_cells = n_cells
         self.n_bboxes = n_bboxes
         self.n_classes = n_classes
-        self.lamb_coord = lamb_coord
-        self.lamb_noobj = lamb_noobj
+        self.coord_coeff = coord_coeff
+        self.noobj_coeff = noobj_coeff
 
         self.cell_size = img_size // n_cells
 
@@ -121,21 +121,6 @@ class YOLOv1(nn.Module):
         # "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation
         # between layers"
         self.drop = nn.Dropout(0.5)
-
-        self._init_weights()
-    
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         x = self.darknet(x)
@@ -160,266 +145,124 @@ class YOLOv1(nn.Module):
         )
         return x
 
-    # def get_obj_mask(coord_gt, cls_gt):
-    #     cell_size = 64
-    #     batch_size = cls_gt.size(0)
-    #     x_idx = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
-    #     y_idx = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
-    #     appears = torch.zeros(size=(batch_size, 7, 7), dtype=torch.bool)
-    #     for batch_idx in range(batch_size):
-    #         for bbox_idx in range(cls_gt.size(1)):
-    #             cls_idx = cls_gt[batch_idx, bbox_idx].item()
-    #             if cls_idx != 20:
-    #                 appears[batch_idx, x_idx[batch_idx, bbox_idx], y_idx[batch_idx, bbox_idx]] = True
-    #     return appears
-
-    def get_obj_mask(coord_gt, cls_gt):
-        n_cells=7
-        cell_size = 64
-        batch_size = cls_gt.size(0)
-        x_idx = ((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2 // cell_size).long()
-        y_idx = ((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2 // cell_size).long()
-        
-        appears = torch.zeros(size=(batch_size, (n_cells ** 2) * 2), dtype=torch.bool)
-        idx = (x_idx * n_cells + y_idx)
-        appears[
-            torch.arange(batch_size).repeat_interleave(cls_gt.size(1))[(cls_gt != 20).view(-1)],
-            idx.view(-1)[(cls_gt != 20).view(-1)],
-        ] = 1
-        appears[
-            torch.arange(batch_size).repeat_interleave(cls_gt.size(1))[(cls_gt != 20).view(-1)],
-            idx.view(-1)[(cls_gt != 20).view(-1)] + n_cells ** 2,
-        ] = 1
-        return appears
-
-    # def _encode(self, coord_gt, cls_gt):
-    #     img_size=448
-    #     # a = (((coord_gt[:, :, 0] + coord_gt[:, :, 2]) / 2) % cell_size) / cell_size
-    #     # b = (((coord_gt[:, :, 1] + coord_gt[:, :, 3]) / 2) % cell_size) / cell_size
-    #     # c = (coord_gt[:, :, 2] - coord_gt[:, :, 0]) / img_size
-    #     # d = (coord_gt[:, :, 3] - coord_gt[:, :, 1]) / img_size
-    #     # torch.cat([a, b, c, d], dim=2)
-
-    def _encode(self, coord_gt, cls_gt):
-        cell_size = 64
-        img_size=448
-        obj_mask = get_obj_mask(coord_gt, cls_gt)
-        pred_coord[obj_mask].shape
-        obj_mask
-        coord_gt
-        cls_gt
-        obj_ms
-
-
-        
-        # "We parametrize the bounding box x and y coordinates to be offsets
-        # of a particular grid cell location so they are also bounded between 0 and 1."
-        gt["x"] = gt.apply(
-            lambda x: (((x["l"] + x["r"]) / 2) % self.cell_size) / self.cell_size,
-            axis=1
-        )
-        gt["y"] = gt.apply(
-            lambda x: (((x["t"] + x["b"]) / 2) % self.cell_size) / self.cell_size,
-            axis=1
-        )
-        # "We normalize the bounding box width and height by the image width and height
-        # so that they fall between 0 and 1."
-        gt["w"] = gt.apply(lambda x: (x["r"] - x["l"]) / self.img_size, axis=1)
-        gt["h"] = gt.apply(lambda x: (x["b"] - x["t"]) / self.img_size, axis=1)
-
-        gt["x_grid"] = gt.apply(
-            lambda x: int((x["l"] + x["r"]) / 2 / self.cell_size), axis=1
-        )
-        gt["y_grid"] = gt.apply(
-            lambda x: int((x["t"] + x["b"]) / 2 / self.cell_size), axis=1
-        )
-        return gt
-
-    def decode(self, x):
-        # x = out
-        bbox = x.clone()
-
-        bbox[:, (2, 7), ...] *= self.img_size # w
-        bbox[:, (3, 8), ...] *= self.img_size # h
-        bbox[:, (0, 5), ...] *= self.cell_size # x
-        bbox[:, (0, 5), ...] += torch.linspace(
-            0, self.img_size - self.cell_size, self.n_cells,
-        ).unsqueeze(0) # x
-        bbox[:, (1, 6), ...] *= self.cell_size # y
-        bbox[:, (1, 6), ...] += torch.linspace(
-            0, self.img_size - self.cell_size, self.n_cells,
-        ).unsqueeze(1) # y
-
-        l = bbox[:, (0, 5), ...] - bbox[:, (2, 7), ...] / 2
-        t = bbox[:, (1, 6), ...] - bbox[:, (3, 8), ...] / 2
-        r = bbox[:, (0, 5), ...] + bbox[:, (2, 7), ...] / 2
-        b = bbox[:, (1, 6), ...] + bbox[:, (3, 8), ...] / 2
-
-        bbox[:, (0, 5), ...] = l
-        bbox[:, (1, 6), ...] = t
-        bbox[:, (2, 7), ...] = r
-        bbox[:, (3, 8), ...] = b
-
-        bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...] = torch.clip(
-            bbox[:, (0, 1, 2, 3, 5, 6, 7, 8), ...], min=0, max=self.img_size
-        )
-
-        bbox1 = torch.cat([bbox[:, : 5, ...], bbox[:, 10:, ...]], dim=1)
-        bbox1 = rearrange(bbox1, pattern="b c h w -> b (h w) c")
-
-        bbox2 = torch.cat([bbox[:, 5: 10, ...], bbox[:, 10:, ...]], dim=1)
-        bbox2 = rearrange(bbox2, pattern="b c h w -> b (h w) c")
-
-        bbox = torch.cat([bbox1, bbox2], dim=1)
-        # return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
-        return bbox[..., : 4], bbox[..., 4], bbox[..., 5:]
-
-
-    def denormalize_xywh(norm_xywh):
-        # norm_xywh = norm_pred_xywh
+    def denormalize_xywh(self, norm_xywh):
+        # norm_xywh = pred_norm_xywh
         xywh = norm_xywh.clone()
-        xywh[:, :, :, 0] *= cell_size
-        xywh[:, :, :, 1] *= cell_size
-        xywh[:, :, :, 2] *= img_size
-        xywh[:, :, :, 3] *= img_size
+        xywh[:, :, :, 0] *= self.cell_size
+        xywh[:, :, :, 1] *= self.cell_size
+        xywh[:, :, :, 2] *= self.img_size
+        xywh[:, :, :, 3] *= self.img_size
         return xywh
 
-
-    def xywh_to_ltrb(xywh):
+    def xywh_to_ltrb(self, xywh):
         l = torch.clip(xywh[:, :, :, 0] - xywh[:, :, :, 2] / 2, min=0)
         t = torch.clip(xywh[:, :, :, 1] - xywh[:, :, :, 3] / 2, min=0)
-        r = torch.clip(xywh[:, :, :, 0] + xywh[:, :, :, 2] / 2, max=img_size)
-        b = torch.clip(xywh[:, :, :, 1] + xywh[:, :, :, 3] / 2, max=img_size)
+        r = torch.clip(xywh[:, :, :, 0] + xywh[:, :, :, 2] / 2, max=self.img_size)
+        b = torch.clip(xywh[:, :, :, 1] + xywh[:, :, :, 3] / 2, max=self.img_size)
         return torch.stack([l, t, r, b], dim=3)
-    
 
-    def get_loss(self, x, norm_gt_xywh, gt_cls_idx, obj_mask, noobj_mask):
+    def _get_resp_mask(self, pred_norm_xywh, gt_norm_xywh, obj_mask):
         """
-        norm_gt_xywh: [B, N, K, 4]
-        gt_cls_idx: [B, N, K, 1]
+        "$\mathbb{1}^{obj}_{ij}$"; "The $j$th bounding box predictor in cell $i$
+        is 'responsible' for that prediction." 
+
+        Args:
+            pred_norm_xywh (_type_): _description_
+            gt_norm_xywh (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        pred_xywh = self.denormalize_xywh(pred_norm_xywh)
+        pred_ltrb = self.xywh_to_ltrb(pred_xywh)
+
+        gt_xywh = self.denormalize_xywh(gt_norm_xywh)
+        gt_ltrb = self.xywh_to_ltrb(gt_xywh)
+
+        iou = get_iou(pred_ltrb, gt_ltrb)
+        _, idx_max = torch.max(iou, dim=2, keepdim=False)
+        iou_mask = F.one_hot(idx_max[:, :, 0], num_classes=self.n_bboxes)[:, :, :, None].bool()
+        return iou_mask * obj_mask.repeat(1, 1, self.n_bboxes, 1)
+
+    def get_coord_loss(self, out, gt_norm_xywh, obj_mask):
+        pred_norm_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
+        resp_mask = self._get_resp_mask(
+            pred_norm_xywh=pred_norm_xywh,
+            gt_norm_xywh=gt_norm_xywh,
+            obj_mask=obj_mask,
+        )
+        x_mse = (
+            resp_mask * F.mse_loss(
+                pred_norm_xywh[:, :, :, 0: 1],
+                gt_norm_xywh[:, :, :, 0: 1].repeat(1, 1, self.n_bboxes, 1),
+                reduction="none",
+            )
+        ).mean()
+        y_mse = (
+            resp_mask * F.mse_loss(
+                pred_norm_xywh[:, :, :, 1: 2],
+                gt_norm_xywh[:, :, :, 1: 2].repeat(1, 1, self.n_bboxes, 1),
+                reduction="none",
+            )
+        ).mean()
+        w_mse = (
+            resp_mask * F.mse_loss(
+                pred_norm_xywh[:, :, :, 2: 3] ** 0.5,
+                gt_norm_xywh[:, :, :, 2: 3].repeat(1, 1, self.n_bboxes, 1) ** 0.5,
+                reduction="none",
+            )
+        ).mean()
+        h_mse = (
+            resp_mask * F.mse_loss(
+                pred_norm_xywh[:, :, :, 3: 4] ** 0.5,
+                gt_norm_xywh[:, :, :, 3: 4].repeat(1, 1, self.n_bboxes, 1) ** 0.5,
+                reduction="none",
+            )
+        ).mean()
+        # print(x_mse, y_mse, w_mse, h_mse)
+        return self.coord_coeff * (x_mse + y_mse + w_mse + h_mse)
+
+    def get_conf_loss(self, out, obj_mask):
+        pred_conf = rearrange(out[:, 8: 10], pattern="b (n c) h w -> b (h w) c n", n=1)
+        obj_conf_loss = (
+            obj_mask * F.mse_loss(
+                pred_conf, torch.ones_like(pred_conf), reduction="none",
+            )
+        ).mean()
+        noobj_conf_loss = self.noobj_coeff * (
+            (~obj_mask) * F.mse_loss(
+                pred_conf, torch.zeros_like(pred_conf), reduction="none",
+            )
+        ).mean() # "$\mathbb{1}^{noobj}_{ij}$"
+        return obj_conf_loss + noobj_conf_loss
+
+    def get_cls_loss(self, out, gt_cls_prob):
+        pred_cls_prob = rearrange(
+            out[:, 10: 30], pattern="b (n c) h w -> b (h w) c n", n=self.n_classes,
+        )
+        return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="mean")
+
+    def get_loss(self, x, gt_norm_xywh, gt_cls_prob, obj_mask):
+        """
+        gt_norm_xywh: [B, N, K, 4]
+        gt_cls_prob: [B, N, K, 1]
             L: n_bboxes (2)
             K: n_bboxes_per_cell (1)
         """
-        img_size=448
-        cell_size=448//7
-        n_cells=7
-        n_bboxes=2
-
         out = self(x)
-        # out.min(), out.max()
-
-        batch_size = out.size(0)
-        # x1, x2, y1, y2, w1, w2, h1, h2, conf1, conf2
-        # norm_pred_xywh1 = rearrange(out[:, 0: 8: n_bboxes], pattern="b (n c) h w -> b (h w) c n", n=4)
-        # norm_pred_xywh2 = rearrange(out[:, 1: 8: n_bboxes], pattern="b (n c) h w -> b (h w) c n", n=4)
-        # norm_pred_xywh = torch.cat([norm_pred_xywh1, norm_pred_xywh2], dim=2)
-        norm_pred_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
-        pred_xywh = denormalize_xywh(norm_pred_xywh)
-        pred_ltrb = xywh_to_ltrb(pred_xywh)
-
-        gt_xywh = denormalize_xywh(norm_gt_xywh)
-        gt_ltrb = xywh_to_ltrb(gt_xywh)
-
-        iou = get_iou(pred_ltrb, gt_ltrb)
-        max_iou, idx_max = torch.max(iou, dim=2, keepdim=False)
-        iou_mask = F.one_hot(idx_max[:, :, 0], num_classes=n_bboxes)[:, :, :, None].repeat(1, 1, 1, 4).bool()
-        resp_mask = iou_mask * obj_mask[:, :, None, None].repeat(1, 1, n_bboxes, 4)
-        resp_norm_pred_xywh = resp_mask * norm_pred_xywh
-        
-
-
-
-
-
-        norm_pred_xywh.shape, norm_gt_xywh.shape
-        # iou.shape
-        iou.shape
-        idx_max.shape
-
-
-
-        norm_pred_xywh.shape
-        norm_pred_xywh.shape
-
-
-        pred_conf1 = out[:, 8: 9].view(batch_size, 1, -1).permute(0, 2, 1)
-        pred_conf2 = out[:, 9: 10].view(batch_size, 1, -1).permute(0, 2, 1)
-
-        pred_cls_logit = out[:, 10: 30].view(batch_size, 20, -1).permute(0, 2, 1)
-
-
-        iou.shape
-
-
-
-
-        obj_mask = get_obj_mask(coord_gt, cls_gt)
-        
-
-
-        # conf_order = torch.argsort(pred_conf[..., None].repeat(1, 1, 4), dim=1)
-        conf_order = torch.argsort(pred_conf, dim=1)
-        sorted_pred_coord = torch.gather(pred_coord, dim=1, index=conf_order[..., None].repeat(1, 1, 4))
-        # pred_coord.shape, sorted_pred_coord.shape
-        for batch_idx in range(4):
-            batch_idx=2
-            iou = get_iou(coord_gt[batch_idx], sorted_pred_coord[batch_idx])
-            iou.shape
-        
-
-
-
-
-        xy_indices = (0, 1, 5, 6)
-        wh_indices = (2, 3, 7, 8)
-        conf_indices = (4, 9)
-        cls_indices = range(10, 30)
-
-        b, _, _, _ = pred.shape
-
-        pred = pred.permute(0, 2, 3, 1)
-        gt = gt.permute(0, 2, 3, 1)
-
-        obj_mask = (gt[..., 4] == 1)
-        noobj_mask = (gt[..., 4] != 1)
-
-        obj_indices = obj_mask.nonzero(as_tuple=True)
-        noobj_indices = noobj_mask.nonzero(as_tuple=True)
-
-        ### Coordinate loss
-        pred_xy_obj = pred[..., xy_indices][obj_indices]
-        gt_xy_obj = gt[..., xy_indices][obj_indices]
-        xy_loss = self.lamb_coord * F.mse_loss(pred_xy_obj, gt_xy_obj, reduction="mean")
-
-        pred_wh_obj = pred[..., wh_indices][obj_indices]
-        gt_wh_obj = gt[..., wh_indices][obj_indices]
-        wh_loss = self.lamb_coord * F.mse_loss(pred_wh_obj ** 0.5, gt_wh_obj ** 0.5)
-        coord_loss = xy_loss + wh_loss
-
-        ### Confidence loss
-        pred_conf_obj = pred[..., conf_indices][obj_indices]
-        gt_conf_obj = gt[..., conf_indices][obj_indices]
-        conf_loss_obj = F.mse_loss(pred_conf_obj, gt_conf_obj)
-
-        pred_conf_noobj = pred[..., conf_indices][noobj_indices]
-        gt_conf_noobj = gt[..., conf_indices][noobj_indices]
-        conf_loss_noobj = self.lamb_noobj * F.mse_loss(pred_conf_noobj, gt_conf_noobj)
-
-        conf_loss = conf_loss_obj + conf_loss_noobj
-
-        ### Classification loss
-        pred_cls_obj = pred[..., cls_indices][obj_indices]
-        gt_cls_obj = gt[..., cls_indices][obj_indices]
-        cls_loss = F.mse_loss(pred_cls_obj, gt_cls_obj)
-
-        loss = coord_loss + conf_loss + cls_loss
-        loss /= b
-        return loss
-
+        # pred_sel_norm_xywh = torch.take_along_dim(pred_norm_xywh, indices=idx_max[:, :, :, None], dim=2)
+        coord_loss = self.get_coord_loss(
+            out, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask,
+        )
+        conf_loss = self.get_conf_loss(out, obj_mask=obj_mask)
+        cls_loss = self.get_cls_loss(out, gt_cls_prob=gt_cls_prob)
+        print(coord_loss, conf_loss, cls_loss)
+        return coord_loss + conf_loss + cls_loss
 
 if __name__ == "__main__":
     model = YOLOv1()
     x = torch.randn((4, 3, 448, 448))
-    out = model(x)
-
-    out.shape
+    loss = model.get_loss(
+        x, gt_norm_xywh=gt_norm_xywh, gt_cls_prob=gt_cls_prob, obj_mask=obj_mask,
+    )
+    loss
