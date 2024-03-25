@@ -45,14 +45,37 @@ class VOC2012Dataset(Dataset):
         return len(self.annots)
 
     @staticmethod
-    def parse_xml_file(xml_path):
-        xml_path = "/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2007_000027.xml"
+    def get_image_from_xml_path(xml_path):
+        # xml_path = "/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2012_004295.xml"
         xtree = et.parse(xml_path)
         xroot = xtree.getroot()
-
         img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
-        image = Image.open(img_path).convert("RGB")
+        return Image.open(img_path).convert("RGB")
 
+    def parse_xml_file(self, xml_path):
+        image = self.get_image_from_xml_path(xml_path)
+        # xml_path = "/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations/2012_004272.xml"
+        # cell_size = 64
+        # n_bboxes_per_cell=2
+
+        # for bbox in xroot.findall("object"):
+        #     l = int(bbox.find("bndbox").find("xmin").text)
+        #     t = int(bbox.find("bndbox").find("ymin").text)
+        #     r = int(bbox.find("bndbox").find("xmax").text)
+        #     b = int(bbox.find("bndbox").find("ymax").text)
+
+        #     x = (l + r) // 2
+        #     y = (t + b) // 2
+        #     w = r - l
+        #     h = b - t
+
+        #     x_cell_idx = x // cell_size
+        #     y_cell_idx = y // cell_size
+        #     x_cell_idx, y_cell_idx
+
+
+        xtree = et.parse(xml_path)
+        xroot = xtree.getroot()
         gt_ltrb = torch.tensor(
             [
                 (
@@ -139,16 +162,26 @@ class VOC2012Dataset(Dataset):
             dim=1,
         )
 
+    def normalize_xywh(self, xywh):
+        norm_xywh = xywh.clone().float()
+        norm_xywh[:, 0] = norm_xywh[:, 0] % self.cell_size / self.cell_size
+        norm_xywh[:, 1] = norm_xywh[:, 1] % self.cell_size / self.cell_size
+        norm_xywh[:, 2] /= self.img_size
+        norm_xywh[:, 3] /= self.img_size
+        return norm_xywh
+
     def xy_to_obj_idx(self, xy):
-        return xy // self.cell_size
+        return (xy // self.cell_size).to(torch.long)
 
     def row_idx_to_obj_mask(self, row_idx):
         """
         $\mathbb{1}^{obj}_{i}$; "If object appears in cell $i$."
         """
-        obj_mask = torch.zeros(size=((self.n_cells ** 2) * self.n_bboxes,), dtype=torch.bool)
+        # obj_mask = torch.zeros(size=((self.n_cells ** 2) * self.n_bboxes,), dtype=torch.bool)
+        # obj_mask[row_idx] = True
+        # obj_mask[row_idx + (self.n_cells ** 2)] = True
+        obj_mask = torch.zeros(size=((self.n_cells ** 2),), dtype=torch.bool)
         obj_mask[row_idx] = True
-        obj_mask[row_idx + (self.n_cells ** 2)] = True
         return obj_mask
 
     def row_idx_to_noobj_mask(self, row_idx):
@@ -158,14 +191,6 @@ class VOC2012Dataset(Dataset):
         """
         obj_mask = self.row_idx_to_obj_mask(row_idx)
         return ~obj_mask
-
-    def normalize_xywh(self, xywh):
-        norm_xywh = xywh.clone().float()
-        norm_xywh[:, 0] = norm_xywh[:, 0] % self.cell_size / self.cell_size
-        norm_xywh[:, 1] = norm_xywh[:, 1] % self.cell_size / self.cell_size
-        norm_xywh[:, 2] /= self.img_size
-        norm_xywh[:, 3] /= self.img_size
-        return norm_xywh
 
     def obj_idx_to_row_idx(self, obj_idx):
         row_idx = obj_idx[:, 0] * self.n_cells + obj_idx[:, 1]
@@ -181,7 +206,7 @@ class VOC2012Dataset(Dataset):
                 cnts[row] += 1
                 exists[row + i * (self.n_cells ** 2)] = True
                 valid_indices.append(idx)
-        dedup_row_idx = torch.tensor(list(exists.keys()), dtype=torch.int32)
+        dedup_row_idx = torch.tensor(list(exists.keys()), dtype=torch.long)
         return valid_indices, dedup_row_idx
 
     def __getitem__(self, idx):
@@ -302,10 +327,14 @@ class DynamicPadding(object):
 
 
 if __name__ == "__main__":
-    ds = VOC2012Dataset(annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations", augment=True)
+    ds = VOC2012Dataset(annot_dir="/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations", augment=True)
     dl = DataLoader(ds, batch_size=4, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
     image, norm_gt_xywh, gt_cls_idx, obj_mask, noobj_mask = next(di)
+    # norm_gt_xywh = norm_gt_xywh.permute(0, 2, 1)
+    # gt_cls_idx = gt_cls_idx.permute(0, 2, 1)
+    norm_gt_xywh = norm_gt_xywh[:, :, None, :]
+    gt_cls_idx = gt_cls_idx[:, :, None, :]
     norm_gt_xywh.shape, gt_cls_idx.shape, obj_mask.shape, noobj_mask.shape
 
 

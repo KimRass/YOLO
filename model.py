@@ -204,7 +204,7 @@ class YOLOv1(nn.Module):
         cell_size = 64
         img_size=448
         obj_mask = get_obj_mask(coord_gt, cls_gt)
-        coord_pred[obj_mask].shape
+        pred_coord[obj_mask].shape
         obj_mask
         coord_gt
         cls_gt
@@ -274,22 +274,96 @@ class YOLOv1(nn.Module):
         # return torch.cat([bbox[..., : 5], bbox[..., 5:]], dim=2)
         return bbox[..., : 4], bbox[..., 4], bbox[..., 5:]
 
-    def get_loss(self, x, coord_gt, cls_gt):
-        # out = self(x)
-        # pred = self.decode(out)
+
+    def denormalize_xywh(norm_xywh):
+        # norm_xywh = norm_pred_xywh
+        xywh = norm_xywh.clone()
+        xywh[:, :, :, 0] *= cell_size
+        xywh[:, :, :, 1] *= cell_size
+        xywh[:, :, :, 2] *= img_size
+        xywh[:, :, :, 3] *= img_size
+        return xywh
+
+
+    def xywh_to_ltrb(xywh):
+        l = torch.clip(xywh[:, :, :, 0] - xywh[:, :, :, 2] / 2, min=0)
+        t = torch.clip(xywh[:, :, :, 1] - xywh[:, :, :, 3] / 2, min=0)
+        r = torch.clip(xywh[:, :, :, 0] + xywh[:, :, :, 2] / 2, max=img_size)
+        b = torch.clip(xywh[:, :, :, 1] + xywh[:, :, :, 3] / 2, max=img_size)
+        return torch.stack([l, t, r, b], dim=3)
+    
+
+    def get_loss(self, x, norm_gt_xywh, gt_cls_idx, obj_mask, noobj_mask):
+        """
+        norm_gt_xywh: [B, N, K, 4]
+        gt_cls_idx: [B, N, K, 1]
+            L: n_bboxes (2)
+            K: n_bboxes_per_cell (1)
+        """
+        img_size=448
         cell_size=448//7
         n_cells=7
+        n_bboxes=2
+
+        out = self(x)
+        # out.min(), out.max()
+
+        batch_size = out.size(0)
+        # x1, x2, y1, y2, w1, w2, h1, h2, conf1, conf2
+        # norm_pred_xywh1 = rearrange(out[:, 0: 8: n_bboxes], pattern="b (n c) h w -> b (h w) c n", n=4)
+        # norm_pred_xywh2 = rearrange(out[:, 1: 8: n_bboxes], pattern="b (n c) h w -> b (h w) c n", n=4)
+        # norm_pred_xywh = torch.cat([norm_pred_xywh1, norm_pred_xywh2], dim=2)
+        norm_pred_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
+        pred_xywh = denormalize_xywh(norm_pred_xywh)
+        pred_ltrb = xywh_to_ltrb(pred_xywh)
+
+        gt_xywh = denormalize_xywh(norm_gt_xywh)
+        gt_ltrb = xywh_to_ltrb(gt_xywh)
+
+        iou = get_iou(pred_ltrb, gt_ltrb)
+        max_iou, idx_max = torch.max(iou, dim=2, keepdim=False)
+        iou_mask = F.one_hot(idx_max[:, :, 0], num_classes=n_bboxes)[:, :, :, None].repeat(1, 1, 1, 4).bool()
+        resp_mask = iou_mask * obj_mask[:, :, None, None].repeat(1, 1, n_bboxes, 4)
+        resp_norm_pred_xywh = resp_mask * norm_pred_xywh
+        
+
+
+
+
+
+        norm_pred_xywh.shape, norm_gt_xywh.shape
+        # iou.shape
+        iou.shape
+        idx_max.shape
+
+
+
+        norm_pred_xywh.shape
+        norm_pred_xywh.shape
+
+
+        pred_conf1 = out[:, 8: 9].view(batch_size, 1, -1).permute(0, 2, 1)
+        pred_conf2 = out[:, 9: 10].view(batch_size, 1, -1).permute(0, 2, 1)
+
+        pred_cls_logit = out[:, 10: 30].view(batch_size, 20, -1).permute(0, 2, 1)
+
+
+        iou.shape
+
+
+
+
         obj_mask = get_obj_mask(coord_gt, cls_gt)
         
 
 
-        # conf_order = torch.argsort(conf_pred[..., None].repeat(1, 1, 4), dim=1)
-        conf_order = torch.argsort(conf_pred, dim=1)
-        sorted_coord_pred = torch.gather(coord_pred, dim=1, index=conf_order[..., None].repeat(1, 1, 4))
-        # coord_pred.shape, sorted_coord_pred.shape
+        # conf_order = torch.argsort(pred_conf[..., None].repeat(1, 1, 4), dim=1)
+        conf_order = torch.argsort(pred_conf, dim=1)
+        sorted_pred_coord = torch.gather(pred_coord, dim=1, index=conf_order[..., None].repeat(1, 1, 4))
+        # pred_coord.shape, sorted_pred_coord.shape
         for batch_idx in range(4):
             batch_idx=2
-            iou = get_iou(coord_gt[batch_idx], sorted_coord_pred[batch_idx])
+            iou = get_iou(coord_gt[batch_idx], sorted_pred_coord[batch_idx])
             iou.shape
         
 
@@ -347,9 +421,5 @@ if __name__ == "__main__":
     model = YOLOv1()
     x = torch.randn((4, 3, 448, 448))
     out = model(x)
-    # out.shape
-    coord_pred, conf_pred, cls_pred = model.decode(out)
-    coord_pred.shape
-    cls_pred
-    # pred.shape
-    # pred[0, : 4, : 5]
+
+    out.shape
