@@ -7,21 +7,42 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import SGD
 from torch.cuda.amp import GradScaler
+from torch.optim import AdamW
 from contextlib import nullcontext
 from time import time
 from pathlib import Path
 from tqdm.auto import tqdm
+import argparse
+import gc
 
 import config
-from utils import get_elapsed_time
+from utils import set_seed, get_device, get_grad_scaler
 from model import YOLOv1
 from YOLO.data import VOC2012Dataset
 
-torch.manual_seed(config.SEED)
 
-print(f"""AUTOCAST = {config.AUTOCAST}""")
-print(f"""N_WORKERS = {config.N_WORKERS}""")
-print(f"""BATCH_SIZE = {config.BATCH_SIZE}""")
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument("--save_dir", type=str, required=True)
+    parser.add_argument("--n_epochs", type=int, required=True)
+    parser.add_argument("--batch_size", type=int, required=True)
+    parser.add_argument("--lr", type=float, required=True)
+    parser.add_argument("--n_cpus", type=int, required=True)
+    parser.add_argument("--n_warmup_steps", type=int, required=True)
+    parser.add_argument("--img_size", type=int, required=True)
+
+    parser.add_argument("--seed", type=int, default=223, required=False)
+
+    args = parser.parse_args()
+
+    args_dict = vars(args)
+    new_args_dict = dict()
+    for k, v in args_dict.items():
+        new_args_dict[k.upper()] = v
+    args = argparse.Namespace(**new_args_dict)
+    return args
 
 
 # "For the first epochs we slowly raise the learning rate from $10^{-3}$ to $10^{-2}$.
@@ -44,124 +65,175 @@ def update_lr(lr, optim):
     optim.param_groups[0]["lr"] = lr
 
 
-def save_checkpoint(epoch, step, model, optim, scaler, save_path):
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+class Trainer(object):
+    def __init__(self, train_dl, val_dl, save_dir, device):
+        self.train_dl = train_dl
+        self.val_dl = val_dl
+        self.save_dir = Path(save_dir)
+        self.device = device
 
-    ckpt = {
-        "epoch": epoch,
-        "optimizer": optim.state_dict(),
-        "scaler": scaler.state_dict(),
-    }
-    if config.N_GPUS > 1 and config.MULTI_GPU:
-        ckpt["model"] = model.module.state_dict()
-    else:
-        ckpt["model"] = model.state_dict()
+        self.ckpt_path = self.save_dir/"ckpt.pth"
 
-    torch.save(ckpt, str(save_path))
+    def train_for_one_epoch(self, epoch, model, optim, scaler):
+        train_loss = 0
+        pbar = tqdm(self.train_dl, leave=False)
+        for step_idx, ori_image in enumerate(pbar): # "$x_{0} \sim q(x_{0})$"
+            pbar.set_description("Training...")
 
+            ori_image = ori_image.to(self.device)
+            loss = model.get_loss(ori_image)
+            train_loss += (loss.item() / len(self.train_dl))
 
-def load_checkpoint(model, optim, scaler):
-    ckpt = torch.load(config.CKPT_PATH, map_location=config.DEVICE)
-    epoch = ckpt["epoch"]
-    if config.N_GPUS > 1 and config.MULTI_GPU:
-        model.module.load_state_dict(ckpt["model"])
-    else:
-        model.load_state_dict(ckpt["model"])
-    optim.load_state_dict(ckpt["optimizer"])
-    scaler.load_state_dict(ckpt["scaler"])
-    return epoch
+            optim.zero_grad()
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.step(optim)
+                scaler.update()
+            else:
+                loss.backward()
+                optim.step()
+            # self.ema.step(cur_model=model)
 
+            self.scheduler.step((epoch - 1) * len(self.train_dl) + step_idx)
+        return train_loss
 
-ds = VOC2012Dataset(annot_dir=config.ANNOT_DIR)
-dl = DataLoader(
-    ds,
-    batch_size=config.BATCH_SIZE,
-    shuffle=True,
-    num_workers=config.N_WORKERS,
-    pin_memory=True,
-    drop_last=True,
-)
+    @torch.inference_mode()
+    def validate(self, model):
+        val_loss = 0
+        pbar = tqdm(self.val_dl, leave=False)
+        for ori_image in pbar:
+            pbar.set_description("Validating...")
 
-model = YOLOv1()
-if config.N_GPUS > 0:
-    model = model.to(config.DEVICE)
-    if config.N_GPUS > 1 and config.MULTI_GPU:
-        model = nn.DataParallel(model)
+            ori_image = ori_image.to(self.device)
+            loss = model.get_loss(ori_image.detach())
+            val_loss += (loss.item() / len(self.val_dl))
+        return val_loss
 
-        print(f"""Using {config.N_GPUS} GPUs.""")
-    else:
-        print("Using single GPU.")
-else:
-    print("Using CPU.")
+    @staticmethod
+    def save_model_params(model, save_path):
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(modify_state_dict(model.state_dict()), str(save_path))
+        print(f"Saved model params as '{str(save_path)}'.")
 
-optim = SGD(
-    model.parameters(),
-    lr=config.INIT_LR,
-    momentum=config.MOMENTUM,
-    weight_decay=config.WEIGHT_DECAY
-)
+    def save_ckpt(self, epoch, model, optim, min_val_loss, scaler):
+        self.ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        ckpt = {
+            "epoch": epoch,
+            "model": modify_state_dict(model.state_dict()),
+            "optimizer": optim.state_dict(),
+            "min_val_loss": min_val_loss,
+        }
+        if scaler is not None:
+            ckpt["scaler"] = scaler.state_dict()
+        torch.save(ckpt, str(self.ckpt_path))
 
-scaler = GradScaler()
+    @torch.inference_mode()
+    def test_sampling(self, epoch, model, batch_size):
+        gen_image = model.sample(batch_size=batch_size)
+        gen_grid = image_to_grid(gen_image, n_cols=int(batch_size ** 0.5))
+        sample_path = self.save_dir/f"sample-epoch={epoch}.jpg"
+        save_image(gen_grid, save_path=sample_path)
+        wandb.log({"Samples": wandb.Image(sample_path)}, step=epoch)
 
-### Resume from checkpoint.
-if config.CKPT_PATH is not None:
-    init_epoch = load_checkpoint(model=model, optim=optim, scaler=scaler)
-    print(f"""Resuming from epoch {init_epoch}.""")
-else:
-    init_epoch = 0
+    def train(self, n_epochs, model, optim, scaler, n_warmup_steps):
+        for param in model.parameters():
+            try:
+                param.register_hook(lambda grad: torch.clip(grad, -1, 1))
+            except Exception:
+                continue
 
-ds_size = len(ds)
-n_steps_per_epoch = ds_size // config.BATCH_SIZE
-start_time = time()
+        model = torch.compile(model)
+        # self.ema = EMA(weight=0.995, model=model)
 
-running_loss = 0
-for epoch in range(init_epoch + 1, config.N_EPOCHS + 1):
-    running_loss = 0
-    for step, (image, gt_norm_xywh, gt_cls_prob, obj_mask) in enumerate(dl, start=1):
-        lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
-        update_lr(lr=lr, optim=optim)
-
-        image = image.to(config.DEVICE)
-        gt_norm_xywh = gt_norm_xywh.to(config.DEVICE)
-        gt_cls_prob = gt_cls_prob.to(config.DEVICE)
-        obj_mask = obj_mask.to(config.DEVICE)
-
-        optim.zero_grad()
-        with torch.autocast(
-            device_type=config.DEVICE.type, dtype=torch.float16
-        ) if config.AUTOCAST else nullcontext():
-            loss = model.get_loss(
-                image,
-                gt_norm_xywh=gt_norm_xywh,
-                gt_cls_prob=gt_cls_prob,
-                obj_mask=obj_mask,
-            )
-        running_loss += loss.item()
-
-        if config.AUTOCAST:
-            scaler.scale(loss).backward()
-            scaler.step(optim)
-            scaler.update()
-        else:
-            loss.backward()
-            optim.step()
-
-    ### Print loss.
-    if (epoch % config.N_PRINT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
-        print(f"""[ {epoch}/{config.N_EPOCHS} ][ {step:,}/{n_steps_per_epoch:,} ]""", end="")
-        print(F"""[ {get_elapsed_time(start_time)} ][ Loss: {running_loss / n_steps_per_epoch:.4f} ]""")
-
-        start_time = time()
-
-    ### Save checkpoint.
-    if (epoch % config.N_CKPT_EPOCHS == 0) or (epoch == config.N_EPOCHS):
-        save_checkpoint(
-            epoch=epoch,
-            step=step,
-            model=model,
-            optim=optim,
-            scaler=scaler,
-            save_path=Path(__file__).parent/f"""checkpoints/{epoch}.pth""",
+        self.scheduler = CosineLRScheduler(
+            optimizer=optim,
+            t_initial=n_epochs * len(self.train_dl),
+            warmup_t=n_warmup_steps,
+            warmup_lr_init=optim.param_groups[0]["lr"] * 0.1,
+            warmup_prefix=True,
+            t_in_epochs=False,
         )
-        print(f"""Saved checkpoint at epoch {epoch}/{config.N_EPOCHS}""", end="")
-        print(f""" and step {step:,}/{n_steps_per_epoch:,}.""")
+
+        init_epoch = 0
+        min_val_loss = math.inf
+        for epoch in range(init_epoch + 1, n_epochs + 1):
+            start_time = time()
+            train_loss = self.train_for_one_epoch(
+                epoch=epoch, model=model, optim=optim, scaler=scaler,
+            )
+            # val_loss = self.validate(self.ema.ema_model)
+            val_loss = self.validate(model)
+            if val_loss < min_val_loss:
+                model_params_path = str(self.save_dir/f"epoch={epoch}-val_loss={val_loss:.4f}.pth")
+                # self.save_model_params(model=self.ema.ema_model, save_path=model_params_path)
+                self.save_model_params(model=model, save_path=model_params_path)
+                min_val_loss = val_loss
+
+            self.save_ckpt(
+                epoch=epoch,
+                # model=self.ema.ema_model,
+                model=model,
+                optim=optim,
+                min_val_loss=min_val_loss,
+                scaler=scaler,
+            )
+
+            # self.test_sampling(epoch=epoch, model=self.ema.ema_model, batch_size=16)
+            self.test_sampling(epoch=epoch, model=model, batch_size=16)
+
+            log = f"[ {get_elapsed_time(start_time)} ]"
+            log += f"[ {epoch}/{n_epochs} ]"
+            log += f"[ Train loss: {train_loss:.4f} ]"
+            log += f"[ Val loss: {val_loss:.4f} | Best: {min_val_loss:.4f} ]"
+            print(log)
+            wandb.log(
+                {"Train loss": train_loss, "Val loss": val_loss, "Min val loss": min_val_loss},
+                step=epoch,
+            )
+
+
+def main():
+    torch.set_printoptions(linewidth=70)
+
+    DEVICE = get_device()
+    args = get_args()
+    set_seed(args.SEED)
+    print(f"[ DEVICE: {DEVICE} ]")
+
+    gc.collect()
+    if DEVICE.type == "cuda":
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+    train_ds = VOC2012Dataset(annot_dir=args.ANNOT_DIR, augment=True)
+    train_dl = DataLoader(
+        train_ds,
+        batch_size=args.BATCH_SIZE,
+        shuffle=True,
+        pin_memory=True,
+        drop_last=True,
+        persistent_workers=True,
+        num_workers=args.N_CPUS,
+    )
+    trainer = Trainer(
+        train_dl=train_dl,
+        save_dir=args.SAVE_DIR,
+        device=DEVICE,
+    )
+
+    model = YOLOv1().to(DEVICE)
+    optim = AdamW(model.parameters(), lr=args.LR)
+    scaler = get_grad_scaler(device=DEVICE)
+
+    trainer.train(
+        n_epochs=args.N_EPOCHS,
+        model=model,
+        optim=optim,
+        scaler=scaler,
+        n_warmup_steps=args.N_WARMUP_STEPS,
+    )
+
+
+if __name__ == "__main__":
+    main()

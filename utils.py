@@ -1,8 +1,9 @@
 import torch
 import torchvision.transforms as T
-from PIL import Image, ImageDraw
+from torch.cuda.amp import GradScaler
 from torchvision.utils import make_grid
 import torchvision.transforms.functional as TF
+from PIL import Image, ImageDraw
 import pandas as pd
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -10,6 +11,8 @@ from time import time
 from datetime import timedelta
 from einops import rearrange
 import numpy as np
+import random
+import os
 
 
 VOC_CLASSES = [
@@ -58,6 +61,31 @@ def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
 def get_elapsed_time(start_time):
     return timedelta(seconds=round(time() - start_time))
 
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+
+
+def get_device():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+    return device
+
+
+def get_grad_scaler(device):
+    return GradScaler() if device.type == "cuda" else None
 
 
 # import config

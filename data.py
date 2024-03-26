@@ -4,7 +4,7 @@
 # "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
 # When testing on 2012 we also include the VOC 2007 test data for training."
 import sys
-sys.path.insert(0, "/home/dmeta0304/Desktop/workspace/YOLO")
+sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO/")
 import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
@@ -177,7 +177,7 @@ class VOC2012Dataset(Dataset):
         """
         "$\mathbb{1}^{obj}_{i}$"; "If object appears in cell $i$."
         """
-        obj_mask = torch.zeros(size=((self.n_cells ** 2), 1, 1), dtype=torch.bool)
+        obj_mask = torch.zeros(size=((self.n_cells ** 2), self.n_bboxes, 1), dtype=torch.bool)
         obj_mask[row_idx] = True
         return obj_mask
 
@@ -209,7 +209,7 @@ class VOC2012Dataset(Dataset):
             image, gt_ltrb = self._scale_randomly(image=image, gt_ltrb=gt_ltrb)
             image, gt_ltrb = self._shift_randomly(image=image, gt_ltrb=gt_ltrb)
             image, gt_ltrb = self._crop_center(image=image, gt_ltrb=gt_ltrb)
-            # image = self._randomly_adjust_b_and_s(image)
+            image = self._randomly_adjust_b_and_s(image)
         # return image, gt_ltrb, gt_cls_idx
         image = TF.to_tensor(image)
         image = TF.normalize(
@@ -244,11 +244,11 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(
-        annot_dir="/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    idx = 200
 
+    # idx = 200
     # for _ in range(4):
     #     image, gt_ltrb, gt_cls_idx = ds[idx]
     #     out = draw_grids_and_bboxes(image, gt_ltrb, gt_cls_idx)
@@ -259,4 +259,7 @@ if __name__ == "__main__":
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)
-    image.shape, gt_norm_xywh.shape, gt_cls_prob.shape, obj_mask.shape
+    # image.shape, gt_norm_xywh.shape, gt_cls_prob.shape, obj_mask.shape
+    # gt_norm_xywh.sum()
+    # gt_norm_xy = gt_norm_xywh[:, :, :, 0: 2].repeat(1, 1, 2, 1)
+    # gt_norm_xy.sum()

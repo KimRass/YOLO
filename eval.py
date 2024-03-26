@@ -26,7 +26,8 @@ def get_area(bbox):
     """
     return torch.clip(
         bbox[:, :, :, 2] - bbox[:, :, :, 0], min=0
-    ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).double()
+    # ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).double()
+    ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).long()
 
 
 # def get_intersection_area(bbox1, bbox2):
@@ -49,7 +50,8 @@ def get_intersection_area(bbox1, bbox2):
     t = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 1][:, :, None, :])
     r = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 2][:, :, None, :])
     b = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 3][:, :, None, :])
-    return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).double()
+    # return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).double()
+    return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).long()
 
 
 def get_iou(bbox1, bbox2):
