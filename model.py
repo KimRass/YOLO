@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from eval import get_iou
+from utils import image_to_grid
 
 LEAKY_RELU_SLOPE = 0.1
 
@@ -108,51 +109,46 @@ class YOLOv1(nn.Module):
 
         self.darknet = Darknet()
 
-        self.conv5_3 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
-        self.conv5_4 = ConvBlock(1024, 1024, kernel_size=3, stride=2, padding=1) # "3×3×1024-s-2"
-
-        self.conv6_1 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
-        self.conv6_2 = ConvBlock(1024, 1024, kernel_size=3, padding=1) # "3×3×1024"
-
-        self.proj1 = nn.Linear(1024 * n_cells * n_cells, 4096)
-        self.proj2 = nn.Linear(
-            4096, n_cells * n_cells * (5 * n_bboxes + n_classes)
+        # "We use a linear activation function for the final layer and all other layers use
+        # the leaky rectified linear activation."
+        self.conv_block = nn.Sequential(
+            ConvBlock(1024, 1024, 3, 1, 1), # "3×3×1024", conv5_3
+            ConvBlock(1024, 1024, 3, 2, 1), # "3×3×1024-s-2", conv5_4
+            ConvBlock(1024, 1024, 3, 1, 1), # "3×3×1024", covn_6_1
+            ConvBlock(1024, 1024, 3, 1, 1), # "3×3×1024", conv6_2
         )
-        # "A dropout layer with rate = .5 after the first connected layer prevents co-adaptation
-        # between layers"
-        self.drop = nn.Dropout(0.5)
+        self.linear_block = nn.Sequential(
+            nn.Flatten(start_dim=1, end_dim=3),
+            nn.Linear(1024 * n_cells * n_cells, 4096),
+            nn.LeakyReLU(negative_slope=LEAKY_RELU_SLOPE),
+            # "A dropout layer with rate = .5 after the first connected layer
+            # prevents co-adaptation between layers."
+            nn.Dropout(0.5),
+            nn.Linear(
+                4096, n_cells * n_cells * (5 * n_bboxes + n_classes)
+            ),
+            # nn.Sigmoid(),
+        )
 
     def forward(self, x):
         x = self.darknet(x)
-
-        x = self.conv5_3(x)
-        x = self.conv5_4(x)
-
-        x = self.conv6_1(x)
-        x = self.conv6_2(x)
-    
-        x = torch.flatten(x, start_dim=1, end_dim=3)
-        x = self.proj1(x)
-        x = self.drop(x)
-        x = F.leaky_relu(x, negative_slope=LEAKY_RELU_SLOPE)
-        x = self.proj2(x)
-        x = torch.sigmoid(x)
-        # "We use a linear activation function for the final layer and all other layers use
-        # the leaky rectified linear activation."
-
-        x = x.view(
+        x = self.conv_block(x)
+        x = self.linear_block(x)
+        return x.view(
             (-1, (5 * self.n_bboxes + self.n_classes), self.n_cells, self.n_cells),
         )
-        return x
 
     def denormalize_xywh(self, norm_xywh):
-        # norm_xywh = pred_norm_xywh
-        xywh = norm_xywh.clone()
-        xywh[:, :, :, 0] *= self.cell_size
-        xywh[:, :, :, 1] *= self.cell_size
-        xywh[:, :, :, 2] *= self.img_size
-        xywh[:, :, :, 3] *= self.img_size
-        return xywh
+        # xywh = norm_xywh.clone()
+        # xywh[:, :, :, 0] *= self.cell_size
+        # xywh[:, :, :, 1] *= self.cell_size
+        # xywh[:, :, :, 2] *= self.img_size
+        # xywh[:, :, :, 3] *= self.img_size
+        norm_xywh[:, :, :, 0] *= self.cell_size
+        norm_xywh[:, :, :, 1] *= self.cell_size
+        norm_xywh[:, :, :, 2] *= self.img_size
+        norm_xywh[:, :, :, 3] *= self.img_size
+        return norm_xywh
 
     def xywh_to_ltrb(self, xywh):
         l = torch.clip(xywh[:, :, :, 0] - xywh[:, :, :, 2] / 2, min=0)
@@ -181,7 +177,9 @@ class YOLOv1(nn.Module):
 
         iou = get_iou(pred_ltrb, gt_ltrb)
         _, idx_max = torch.max(iou, dim=2, keepdim=False)
-        iou_mask = F.one_hot(idx_max[:, :, 0], num_classes=self.n_bboxes)[:, :, :, None].bool()
+        iou_mask = F.one_hot(
+            idx_max[:, :, 0], num_classes=self.n_bboxes,
+        )[:, :, :, None].bool()
         return iou_mask * obj_mask.repeat(1, 1, self.n_bboxes, 1)
 
     def get_coord_loss(self, out, gt_norm_xywh, obj_mask):
@@ -191,6 +189,7 @@ class YOLOv1(nn.Module):
             gt_norm_xywh=gt_norm_xywh,
             obj_mask=obj_mask,
         )
+        print(resp_mask.requires_grad)
         x_mse = (
             resp_mask * F.mse_loss(
                 pred_norm_xywh[:, :, :, 0: 1],
@@ -219,19 +218,22 @@ class YOLOv1(nn.Module):
                 reduction="none",
             )
         ).mean()
-        # print(x_mse, y_mse, w_mse, h_mse)
         return self.coord_coeff * (x_mse + y_mse + w_mse + h_mse)
 
     def get_conf_loss(self, out, obj_mask):
         pred_conf = rearrange(out[:, 8: 10], pattern="b (n c) h w -> b (h w) c n", n=1)
         obj_conf_loss = (
             obj_mask * F.mse_loss(
-                pred_conf, torch.ones_like(pred_conf), reduction="none",
+                pred_conf,
+                torch.ones_like(pred_conf, dtype=torch.float32),
+                reduction="none",
             )
         ).mean()
         noobj_conf_loss = self.noobj_coeff * (
             (~obj_mask) * F.mse_loss(
-                pred_conf, torch.zeros_like(pred_conf), reduction="none",
+                pred_conf,
+                torch.zeros_like(pred_conf, dtype=torch.float32),
+                reduction="none",
             )
         ).mean() # "$\mathbb{1}^{noobj}_{ij}$"
         return obj_conf_loss + noobj_conf_loss
@@ -240,29 +242,57 @@ class YOLOv1(nn.Module):
         pred_cls_prob = rearrange(
             out[:, 10: 30], pattern="b (n c) h w -> b (h w) c n", n=self.n_classes,
         )
+        # gt_cls_prob.sum(dim=3).nonzero()
+        print(torch.argmax(pred_cls_prob[0, 31, 0, :]).item())
+        # print(((pred_cls_prob[0, 24, 0, :] - gt_cls_prob[0, 24, 0, :]) ** 2).mean())
         return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="mean")
 
-    def get_loss(self, x, gt_norm_xywh, gt_cls_prob, obj_mask):
+    def get_loss(self, image, gt_norm_xywh, gt_cls_prob, obj_mask):
         """
         gt_norm_xywh: [B, N, K, 4]
         gt_cls_prob: [B, N, K, 1]
             L: n_bboxes (2)
             K: n_bboxes_per_cell (1)
         """
-        out = self(x)
-        # pred_sel_norm_xywh = torch.take_along_dim(pred_norm_xywh, indices=idx_max[:, :, :, None], dim=2)
-        coord_loss = self.get_coord_loss(
-            out, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask,
-        )
-        conf_loss = self.get_conf_loss(out, obj_mask=obj_mask)
+        out = self(image)
+        # print(out.shape)
+
+        # coord_loss = self.get_coord_loss(
+        #     out, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask,
+        # )
+        # conf_loss = self.get_conf_loss(out, obj_mask=obj_mask)
+        # return conf_loss
         cls_loss = self.get_cls_loss(out, gt_cls_prob=gt_cls_prob)
-        print(coord_loss, conf_loss, cls_loss)
-        return coord_loss + conf_loss + cls_loss
+        return cls_loss
+        # print(coord_loss, conf_loss, cls_loss)
+        # return coord_loss + conf_loss + cls_loss
+
 
 if __name__ == "__main__":
-    model = YOLOv1()
-    x = torch.randn((4, 3, 448, 448))
-    loss = model.get_loss(
-        x, gt_norm_xywh=gt_norm_xywh, gt_cls_prob=gt_cls_prob, obj_mask=obj_mask,
-    )
-    loss
+    from torch.optim import SGD
+
+    DEVICE = torch.device("cpu")
+
+    model = YOLOv1().to(DEVICE)
+    # optim = SGD(model.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.0005)
+    optim = SGD(model.parameters(), lr=0.0001)
+
+    image = image.to(DEVICE)
+    gt_norm_xywh = gt_norm_xywh.to(DEVICE)
+    gt_cls_prob = gt_cls_prob.to(DEVICE)
+    obj_mask = obj_mask.to(DEVICE)
+    gt_cls_prob[0, 31, 0, :]
+    # obj_mask
+    # image_to_grid(image, n_cols=1).show()
+
+    for _ in range(20):
+        loss = model.get_loss(
+            image=image,
+            gt_norm_xywh=gt_norm_xywh,
+            gt_cls_prob=gt_cls_prob,
+            obj_mask=obj_mask,
+        )
+        # print(loss.item())
+        optim.zero_grad()
+        loss.backward()
+        optim.step()

@@ -144,12 +144,11 @@ def batched_image_to_grid(image, n_cols, normalize=False, mean=(0.485, 0.456, 0.
 
 
 def draw_grids_and_bboxes(image, ltrb, cls_idx, img_size=448, n_cells=7, alpha=0.2):
-    # copied = img.copy()
-    # img_size=448
     img = np.array(image)
     overlay = img.copy()
-    for i in range(1, n_cells):
+    for i in range(0, n_cells + 1):
         val = img_size // n_cells * i
+        val = min(img_size - 1, val)
         cv2.line(img=overlay, pt1=(val, 0), pt2=(val, img_size), color=(255, 255, 255), thickness=1)
         cv2.line(img=overlay, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)

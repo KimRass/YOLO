@@ -16,7 +16,6 @@ import config
 from utils import get_elapsed_time
 from model import YOLOv1
 from YOLO.data import VOC2012Dataset
-from loss import Yolov1Loss
 
 torch.manual_seed(config.SEED)
 
@@ -111,8 +110,6 @@ if config.CKPT_PATH is not None:
 else:
     init_epoch = 0
 
-crit = Yolov1Loss()
-
 ds_size = len(ds)
 n_steps_per_epoch = ds_size // config.BATCH_SIZE
 start_time = time()
@@ -120,20 +117,25 @@ start_time = time()
 running_loss = 0
 for epoch in range(init_epoch + 1, config.N_EPOCHS + 1):
     running_loss = 0
-    for step, (image, gt) in enumerate(dl, start=1):
+    for step, (image, gt_norm_xywh, gt_cls_prob, obj_mask) in enumerate(dl, start=1):
         lr = get_lr(step=step, ds_size=ds_size, batch_size=config.BATCH_SIZE)
         update_lr(lr=lr, optim=optim)
 
         image = image.to(config.DEVICE)
-        gt = gt.to(config.DEVICE)
+        gt_norm_xywh = gt_norm_xywh.to(config.DEVICE)
+        gt_cls_prob = gt_cls_prob.to(config.DEVICE)
+        obj_mask = obj_mask.to(config.DEVICE)
 
         optim.zero_grad()
         with torch.autocast(
             device_type=config.DEVICE.type, dtype=torch.float16
         ) if config.AUTOCAST else nullcontext():
-            pred = model(image)
-            loss = crit(pred=pred, gt=gt)
-
+            loss = model.get_loss(
+                image,
+                gt_norm_xywh=gt_norm_xywh,
+                gt_cls_prob=gt_cls_prob,
+                obj_mask=obj_mask,
+            )
         running_loss += loss.item()
 
         if config.AUTOCAST:
