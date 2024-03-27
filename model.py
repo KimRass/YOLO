@@ -10,8 +10,7 @@ import cv2
 import numpy as np
 
 from eval import get_iou
-from utils import image_to_grid, to_pil
-from vis import COLORS
+from utils import COLORS, image_to_grid, to_pil
 
 LEAKY_RELU_SLOPE = 0.1
 
@@ -137,28 +136,28 @@ class YOLOv1(nn.Module):
     def denormalize_xywh(self, norm_xywh):
         xywh = norm_xywh.clone()
         ori_shape = xywh.shape
-        xywh[..., 0] *= self.cell_size
-        xywh[..., 1] *= self.cell_size
-        xywh = xywh.view(xywh.size(0), 7, 7, xywh.size(2), 4)
-        xywh[:, :, :, :, 0] += torch.arange(
+
+        xywh[..., 0: 2] *= self.cell_size
+        xywh = xywh.view(xywh.size(0), self.n_cells, self.n_cells, xywh.size(2), 4)
+        xywh[..., 0] += torch.arange(
             0, self.img_size, self.cell_size,
-        )[None, :, None, None].repeat(1, 1, 7, 1)
-        xywh[:, :, :, :, 1] += torch.arange(
+        )[None, :, None, None].repeat(1, 1, self.n_cells, 1)
+        xywh[..., 1] += torch.arange(
             0, self.img_size, self.cell_size,
-        )[None, None, :, None].repeat(1, 7, 1, 1)
+        )[None, None, :, None].repeat(1, self.n_cells, 1, 1)
         xywh = xywh.view(ori_shape)
-        xywh[..., 2] *= self.img_size
-        xywh[..., 3] *= self.img_size
+
+        xywh[..., 2: 4] *= self.img_size
         return xywh
 
     def xywh_to_ltrb(self, xywh):
-        l = torch.clip(xywh[..., 0] - xywh[..., 2] / 2, min=0)
-        t = torch.clip(xywh[..., 1] - xywh[..., 3] / 2, min=0)
-        r = torch.clip(xywh[..., 0] + xywh[..., 2] / 2, max=self.img_size)
-        b = torch.clip(xywh[..., 1] + xywh[..., 3] / 2, max=self.img_size)
-        return torch.stack([l, t, r, b], dim=3)
+        l = torch.clip(xywh[..., 0] - (xywh[..., 2] / 2), min=0)
+        t = torch.clip(xywh[..., 1] - (xywh[..., 3] / 2), min=0)
+        r = torch.clip(xywh[..., 0] + (xywh[..., 2] / 2), max=self.img_size)
+        b = torch.clip(xywh[..., 1] + (xywh[..., 3] / 2), max=self.img_size)
+        return torch.stack([l, t, r, b], dim=-1)
 
-    def out_to_ltrb(self, out):
+    def model_output_to_ltrb(self, out):
         pred_norm_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
         pred_xywh = self.denormalize_xywh(pred_norm_xywh)
         return self.xywh_to_ltrb(pred_xywh)
@@ -176,7 +175,7 @@ class YOLOv1(nn.Module):
         Returns:
             _type_: _description_
         """
-        pred_ltrb = self.out_to_ltrb(out)
+        pred_ltrb = self.model_output_to_ltrb(out)
 
         gt_xywh = self.denormalize_xywh(gt_norm_xywh)
         gt_ltrb = self.xywh_to_ltrb(gt_xywh)
@@ -251,13 +250,13 @@ class YOLOv1(nn.Module):
         return coord_loss + conf_loss + cls_loss
 
     @torch.inference_mode()
-    def draw_gt(self, image, gt_norm_xywh, obj_mask):
+    def draw_gt(self, image, gt_norm_xywh, obj_mask, padding=1):
         gt_xywh = model.denormalize_xywh(gt_norm_xywh)
         gt_ltrb = model.xywh_to_ltrb(gt_xywh)
 
         batch_size = image.size(0)
         n_cols = int(batch_size ** 0.5)
-        img = np.array(image_to_grid(image, n_cols=n_cols))
+        img = np.array(image_to_grid(image, n_cols=n_cols, padding=padding))
         for batch_idx in range(batch_size):
             gt_ltrb_batch = gt_ltrb[:, :, 0, :][batch_idx]
             obj_mask_batch = obj_mask[:, :, 0, 0][batch_idx]
@@ -269,11 +268,12 @@ class YOLOv1(nn.Module):
             ):
                 row_idx = batch_idx // n_cols
                 col_idx = batch_idx % n_cols
-                l = int(l.item()) + col_idx * self.img_size + (col_idx + 1) * 1
-                t = int(t.item()) + row_idx * self.img_size + (row_idx + 1) * 1
-                r = int(r.item()) + col_idx * self.img_size + (col_idx + 1) * 1
-                b = int(b.item()) + row_idx * self.img_size + (row_idx + 1) * 1
+                l = int(l.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
+                t = int(t.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
+                r = int(r.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
+                b = int(b.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
                 cls_idx = int(cls_idx.item())
+                print(l, t, r, b)
 
                 if l != r:
                     cv2.rectangle(
@@ -292,12 +292,10 @@ class YOLOv1(nn.Module):
 if __name__ == "__main__":
     from torch.optim import SGD, AdamW
 
-    DEVICE = torch.device("cpu")
-    # torch.cuda.current_device()
+    DEVICE = torch.device("mps")
 
     model = YOLOv1().to(DEVICE)
-    # model.draw_gt(image=image, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask)
-
+    model.draw_gt(image=image, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask)
 
     optim = AdamW(model.parameters(), lr=0.0001)
 
@@ -322,4 +320,3 @@ if __name__ == "__main__":
         optim.zero_grad()
         loss.backward()
         optim.step()
-

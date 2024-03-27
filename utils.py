@@ -198,10 +198,10 @@ def denorm(x, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284)):
     )
 
 
-def image_to_grid(image, n_cols, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)):
+def image_to_grid(image, n_cols, padding=1, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)):
     tensor = image.clone().detach().cpu()
     tensor = denorm(tensor, mean=mean, std=std)
-    grid = make_grid(tensor, nrow=n_cols, padding=1, pad_value=1)
+    grid = make_grid(tensor, nrow=n_cols, padding=padding, pad_value=1)
     grid.clamp_(0, 1)
     grid = TF.to_pil_image(grid)
     return grid
@@ -217,18 +217,19 @@ def draw_grids_and_bboxes(image, ltrb, cls_idx, img_size=448, n_cells=7, alpha=0
         cv2.line(img=overlay, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
-    for (l, t, r, b), cls_idx in zip(ltrb, cls_idx):
-        l = l.item()
-        t = t.item()
-        r = r.item()
-        b = b.item()
-        cls_idx = cls_idx.item()
-        cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=1)
+    for (l, t, r, b), idx in zip(ltrb, cls_idx):
+        l = int(l.item())
+        t = int(t.item())
+        r = int(r.item())
+        b = int(b.item())
+        idx = int(idx.item())
+        print(l, t, r, b)
+        cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=COLORS[idx], thickness=2)
         cv2.circle(
             img=img,
             center=((l + r) // 2, (t + b) // 2),
             radius=1,
-            color=COLORS[cls_idx],
+            color=COLORS[idx],
             thickness=2,
         )
     to_pil(img).show()

@@ -4,8 +4,6 @@
     # https://herbwood.tistory.com/3
 
 import torch
-from torchmetrics.detection import IntersectionOverUnion
-from torchvision.ops import box_iou
 from collections import defaultdict
 import numpy as np
 
