@@ -13,6 +13,7 @@ from einops import rearrange
 import numpy as np
 import random
 import os
+import cv2
 
 
 VOC_CLASSES = [
@@ -37,6 +38,28 @@ VOC_CLASSES = [
     "train",
     "tvmonitor"
 ]
+COLORS = (
+    (230, 25, 75),
+    (60, 180, 75),
+    (255, 255, 25),
+    (0, 130, 200),
+    (245, 130, 48),
+    (145, 30, 180),
+    (70, 240, 250),
+    (240, 50, 230),
+    (210, 255, 60),
+    (250, 190, 212),
+    (0, 128, 128),
+    (220, 190, 255),
+    (170, 110, 40),
+    (255, 250, 200),
+    (128, 0, 0),
+    (170, 255, 195),
+    (128, 128, 0),
+    (255, 215, 180),
+    (0, 0, 128),
+    (128, 128, 128),
+)
 
 
 def get_image_dataset_mean_and_std(data_dir, ext="jpg"):
@@ -182,6 +205,33 @@ def image_to_grid(image, n_cols, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)):
     grid.clamp_(0, 1)
     grid = TF.to_pil_image(grid)
     return grid
+
+
+def draw_grids_and_bboxes(image, ltrb, cls_idx, img_size=448, n_cells=7, alpha=0.2):
+    img = np.array(image)
+    overlay = img.copy()
+    for i in range(0, n_cells + 1):
+        val = img_size // n_cells * i
+        val = min(img_size - 1, val)
+        cv2.line(img=overlay, pt1=(val, 0), pt2=(val, img_size), color=(255, 255, 255), thickness=1)
+        cv2.line(img=overlay, pt1=(0, val), pt2=(img_size, val), color=(255, 255, 255), thickness=1)
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+
+    for (l, t, r, b), cls_idx in zip(ltrb, cls_idx):
+        l = l.item()
+        t = t.item()
+        r = r.item()
+        b = b.item()
+        cls_idx = cls_idx.item()
+        cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=1)
+        cv2.circle(
+            img=img,
+            center=((l + r) // 2, (t + b) // 2),
+            radius=1,
+            color=COLORS[cls_idx],
+            thickness=2,
+        )
+    to_pil(img).show()
 
 
 # def _get_width_and_height(img):

@@ -4,7 +4,7 @@
 # "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
 # When testing on 2012 we also include the VOC 2007 test data for training."
 import sys
-sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO/")
+sys.path.insert(0, "/home/dmeta0304/Desktop/workspace/YOLO")
 import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
@@ -177,7 +177,8 @@ class VOC2012Dataset(Dataset):
         """
         "$\mathbb{1}^{obj}_{i}$"; "If object appears in cell $i$."
         """
-        obj_mask = torch.zeros(size=((self.n_cells ** 2), self.n_bboxes, 1), dtype=torch.bool)
+        # obj_mask = torch.zeros(size=((self.n_cells ** 2), self.n_bboxes, 1), dtype=torch.bool)
+        obj_mask = torch.zeros(size=((self.n_cells ** 2), 1, 1), dtype=torch.bool)
         obj_mask[row_idx] = True
         return obj_mask
 
@@ -201,6 +202,7 @@ class VOC2012Dataset(Dataset):
     def __getitem__(self, idx):
         xml_path = self.xml_paths[idx]
         image, gt_ltrb, gt_cls_idx = self.parse_xml_file(xml_path)
+        # print(gt_cls_idx)
 
         if self.augment:
             image, gt_ltrb = self._flip_horizontal(
@@ -210,7 +212,7 @@ class VOC2012Dataset(Dataset):
             image, gt_ltrb = self._shift_randomly(image=image, gt_ltrb=gt_ltrb)
             image, gt_ltrb = self._crop_center(image=image, gt_ltrb=gt_ltrb)
             image = self._randomly_adjust_b_and_s(image)
-        # return image, gt_ltrb, gt_cls_idx
+        draw_grids_and_bboxes(image, gt_ltrb, gt_cls_idx)
         image = TF.to_tensor(image)
         image = TF.normalize(
             image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284),
@@ -222,6 +224,7 @@ class VOC2012Dataset(Dataset):
         dedup_gt_xywh = gt_xywh[valid_indices]
         dedup_gt_norm_xywh = self.normalize_xywh(dedup_gt_xywh)
         gt_cls_prob = F.one_hot(gt_cls_idx, num_classes=self.n_classes).float()
+        # print(gt_cls_prob)
         dedup_gt_cls_prob = gt_cls_prob[valid_indices]
 
         new_gt_norm_xywh = torch.zeros(
@@ -244,7 +247,7 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(
-        annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        annot_dir="/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
 
@@ -255,7 +258,7 @@ if __name__ == "__main__":
     #     Image.fromarray(out).show()
 
 
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=5, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)

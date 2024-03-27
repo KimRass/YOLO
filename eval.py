@@ -13,10 +13,12 @@ import numpy as np
 torch.set_printoptions(linewidth=70)
 
 
-# def get_area(bbox):
-    # return torch.clip(
-    #     bbox[:, 2] - bbox[:, 0], min=0
-    # ) * torch.clip(bbox[:, 3] - bbox[:, 1], min=0)
+def get_dtype(bbox):
+    if bbox.device.type == "mps":
+        return torch.float32
+    else:
+        return torch.float64
+
 def get_area(bbox):
     """
     args:
@@ -24,18 +26,12 @@ def get_area(bbox):
     returns:
         [B, C, N]
     """
+    dtype = get_dtype(bbox)
     return torch.clip(
         bbox[:, :, :, 2] - bbox[:, :, :, 0], min=0
-    # ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).double()
-    ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).long()
+    ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).to(dtype)
 
 
-# def get_intersection_area(bbox1, bbox2):
-#     l = torch.maximum(bbox1[:, 0][:, None], bbox2[:, 0][None, :])
-#     t = torch.maximum(bbox1[:, 1][:, None], bbox2[:, 1][None, :])
-#     r = torch.minimum(bbox1[:, 2][:, None], bbox2[:, 2][None, :])
-#     b = torch.minimum(bbox1[:, 3][:, None], bbox2[:, 3][None, :])
-#     return torch.clip(r - l, min=0) * torch.clip(b - t, min=0)
 def get_intersection_area(bbox1, bbox2):
     """
     args:
@@ -44,29 +40,15 @@ def get_intersection_area(bbox1, bbox2):
     returns:
         [B, C, N, M]
     """
-    # bbox1 = torch.randn(4, 49, 2, 4)
-    # bbox2 = torch.randn(4, 49, 3, 4)
+    dtype = get_dtype(bbox1)
     l = torch.maximum(bbox1[:, :, :, 0][:, :, :, None], bbox2[:, :, :, 0][:, :, None, :])
     t = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 1][:, :, None, :])
     r = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 2][:, :, None, :])
     b = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 3][:, :, None, :])
-    # return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).double()
-    return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).long()
+    return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).to(dtype)
 
 
 def get_iou(bbox1, bbox2):
-    # """
-    # args:
-    #     bbox1: [N, 4]
-    #     bbox2: [M, 4]
-    # returns:
-    #     [N, M]
-    # """
-    # bbox1_area = get_area(bbox1)
-    # bbox2_area = get_area(bbox2)
-    # intersec_area = get_intersection_area(bbox1, bbox2)
-    # union_area = bbox1_area[:, None] + bbox2_area[None, :] - intersec_area
-    # return torch.where(union_area == 0, 0, intersec_area / union_area)
     """
     args:
         bbox1: [B, C, N, 4]

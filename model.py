@@ -7,9 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 import cv2
+import numpy as np
 
 from eval import get_iou
-from utils import image_to_grid
+from utils import image_to_grid, to_pil
+from vis import COLORS
 
 LEAKY_RELU_SLOPE = 0.1
 
@@ -121,7 +123,7 @@ class YOLOv1(nn.Module):
             nn.Linear(
                 4096, n_cells * n_cells * (5 * n_bboxes + n_classes)
             ),
-            # nn.Sigmoid(),
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -134,17 +136,26 @@ class YOLOv1(nn.Module):
 
     def denormalize_xywh(self, norm_xywh):
         xywh = norm_xywh.clone()
-        xywh[:, :, :, 0] *= self.cell_size
-        xywh[:, :, :, 1] *= self.cell_size
-        xywh[:, :, :, 2] *= self.img_size
-        xywh[:, :, :, 3] *= self.img_size
+        ori_shape = xywh.shape
+        xywh[..., 0] *= self.cell_size
+        xywh[..., 1] *= self.cell_size
+        xywh = xywh.view(xywh.size(0), 7, 7, xywh.size(2), 4)
+        xywh[:, :, :, :, 0] += torch.arange(
+            0, self.img_size, self.cell_size,
+        )[None, :, None, None].repeat(1, 1, 7, 1)
+        xywh[:, :, :, :, 1] += torch.arange(
+            0, self.img_size, self.cell_size,
+        )[None, None, :, None].repeat(1, 7, 1, 1)
+        xywh = xywh.view(ori_shape)
+        xywh[..., 2] *= self.img_size
+        xywh[..., 3] *= self.img_size
         return xywh
 
     def xywh_to_ltrb(self, xywh):
-        l = torch.clip(xywh[:, :, :, 0] - xywh[:, :, :, 2] / 2, min=0)
-        t = torch.clip(xywh[:, :, :, 1] - xywh[:, :, :, 3] / 2, min=0)
-        r = torch.clip(xywh[:, :, :, 0] + xywh[:, :, :, 2] / 2, max=self.img_size)
-        b = torch.clip(xywh[:, :, :, 1] + xywh[:, :, :, 3] / 2, max=self.img_size)
+        l = torch.clip(xywh[..., 0] - xywh[..., 2] / 2, min=0)
+        t = torch.clip(xywh[..., 1] - xywh[..., 3] / 2, min=0)
+        r = torch.clip(xywh[..., 0] + xywh[..., 2] / 2, max=self.img_size)
+        b = torch.clip(xywh[..., 1] + xywh[..., 3] / 2, max=self.img_size)
         return torch.stack([l, t, r, b], dim=3)
 
     def out_to_ltrb(self, out):
@@ -156,6 +167,7 @@ class YOLOv1(nn.Module):
         """
         "$\mathbb{1}^{obj}_{ij}$"; "The $j$th bounding box predictor in cell $i$
         is 'responsible' for that prediction." 
+        ""$\mathbb{1}^{noobj}_{ij}$"; If invert the return of this function.
 
         Args:
             pred_norm_xywh (_type_): _description_
@@ -174,7 +186,7 @@ class YOLOv1(nn.Module):
         iou_mask = F.one_hot(
             idx_max[:, :, 0], num_classes=self.n_bboxes,
         )[:, :, :, None].bool()
-        return iou_mask * obj_mask
+        return iou_mask * obj_mask.repeat(1, 1, self.n_bboxes, 1)
 
     def get_coord_loss(self, out, gt_norm_xywh, resp_mask):
         pred_norm_xy = rearrange(out[:, 0: 4], pattern="b (n c) h w -> b (h w) c n", n=2)
@@ -201,14 +213,14 @@ class YOLOv1(nn.Module):
         pred_conf = self.out_to_conf(out)
         obj_conf_loss = F.mse_loss(
             pred_conf,
-            torch.where(resp_mask, 1., 0.),
+            torch.where(resp_mask, torch.ones_like(pred_conf), pred_conf),
             reduction="mean",
         )
         noobj_conf_loss = self.noobj_coeff * F.mse_loss(
             pred_conf,
-            torch.where(~resp_mask, 1., 0.),
+            torch.where(~resp_mask, torch.zeros_like(pred_conf), pred_conf),
             reduction="mean",
-        ) # "$\mathbb{1}^{noobj}_{ij}$"
+        )
         return obj_conf_loss + noobj_conf_loss
 
     def get_cls_loss(self, out, gt_cls_prob):
@@ -238,67 +250,67 @@ class YOLOv1(nn.Module):
         cls_loss = self.get_cls_loss(out, gt_cls_prob=gt_cls_prob)
         return coord_loss + conf_loss + cls_loss
 
-    # def denormalize_xywh(norm_xywh):
-    #     xywh = norm_xywh.clone()
-    #     xywh[:, :, :, 0] *= 64
-    #     xywh[:, :, :, 1] *= 64
-    #     xywh[:, :, :, 2] *= 448
-    #     xywh[:, :, :, 3] *= 448
-    #     return norm_xywh
-
     @torch.inference_mode()
-    def draw_pred(self, image, out):
-        import numpy as np
-        out = model(image)
-        # out.max()
-        # pred_norm_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
-        # pred_xywh = model.denormalize_xywh(pred_norm_xywh)
-        # pred_xywh.max()
-        
-        pred_ltrb = model.out_to_ltrb(out)
-        pred_conf = model.out_to_conf(out)
-        pil_image = image_to_grid(image, n_cols=int(image.size(0) ** 0.5))
-        img = np.array(pil_image)
-        # pred_ltrb.shape, pred_conf.shape
-        # pred_conf[batch_idx].view(98)
-        for batch_idx in range(pred_ltrb.size(0)):
-            ltrb = pred_ltrb[batch_idx].view(-1, 4)
-            conf = pred_conf[batch_idx].reshape(-1, 1)
-            # ltrb.shape, conf.shape
-            for l, t, r, b in ltrb[(conf >= 0.5).repeat(1, 4)].view(-1, 4):
-                l = int(l.item())
-                t = int(t.item())
-                r = int(r.item())
-                b = int(b.item())
-                cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=(255, 0, 0), thickness=1)
-                cv2.circle(
-                    img=img,
-                    center=((l + r) // 2, (t + b) // 2),
-                    radius=1,
-                    color=(255, 0, 0),
-                    thickness=2,
-                )
+    def draw_gt(self, image, gt_norm_xywh, obj_mask):
+        gt_xywh = model.denormalize_xywh(gt_norm_xywh)
+        gt_ltrb = model.xywh_to_ltrb(gt_xywh)
+
+        batch_size = image.size(0)
+        n_cols = int(batch_size ** 0.5)
+        img = np.array(image_to_grid(image, n_cols=n_cols))
+        for batch_idx in range(batch_size):
+            gt_ltrb_batch = gt_ltrb[:, :, 0, :][batch_idx]
+            obj_mask_batch = obj_mask[:, :, 0, 0][batch_idx]
+            gt_cls_prob_batch = gt_cls_prob[:, :, 0, :][batch_idx]
+            gt_cls_idx_batch = torch.argmax(gt_cls_prob_batch[obj_mask_batch], dim=-1)
+
+            for (l, t, r, b), cls_idx in zip(
+                gt_ltrb_batch[obj_mask_batch], gt_cls_idx_batch,
+            ):
+                row_idx = batch_idx // n_cols
+                col_idx = batch_idx % n_cols
+                l = int(l.item()) + col_idx * self.img_size + (col_idx + 1) * 1
+                t = int(t.item()) + row_idx * self.img_size + (row_idx + 1) * 1
+                r = int(r.item()) + col_idx * self.img_size + (col_idx + 1) * 1
+                b = int(b.item()) + row_idx * self.img_size + (row_idx + 1) * 1
+                cls_idx = int(cls_idx.item())
+
+                if l != r:
+                    cv2.rectangle(
+                        img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=2,
+                    )
+                    cv2.circle(
+                        img=img,
+                        center=((l + r) // 2, (t + b) // 2),
+                        radius=1,
+                        color=COLORS[cls_idx],
+                        thickness=2,
+                    )
+        to_pil(img).show()
 
 
 if __name__ == "__main__":
     from torch.optim import SGD, AdamW
 
-    DEVICE = torch.device("mps")
+    DEVICE = torch.device("cpu")
+    # torch.cuda.current_device()
 
     model = YOLOv1().to(DEVICE)
-    # optim = SGD(model.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.0005)
+    # model.draw_gt(image=image, gt_norm_xywh=gt_norm_xywh, obj_mask=obj_mask)
+
+
     optim = AdamW(model.parameters(), lr=0.0001)
-    # optim = SGD(model.parameters(), lr=0.0001)
 
     image = image.to(DEVICE)
     gt_norm_xywh = gt_norm_xywh.to(DEVICE)
     gt_cls_prob = gt_cls_prob.to(DEVICE)
     obj_mask = obj_mask.to(DEVICE)
+    # gt_norm_xywh.dtype
     # gt_cls_prob.sum(dim=3).nonzero()
     # gt_cls_prob[0, 3, 0, :]
     # image_to_grid(image, n_cols=1).show()
 
-    for _ in range(40):
+    for _ in range(14):
         loss = model.get_loss(
             image=image,
             gt_norm_xywh=gt_norm_xywh,
@@ -311,23 +323,3 @@ if __name__ == "__main__":
         loss.backward()
         optim.step()
 
-
-    # gt_norm_xywh.sum()
-    # gt_norm_xywh.requires_grad
-
-    # out = model(image)
-    # resp_mask = model._get_responsibility_mask(
-    #     out=out,
-    #     gt_norm_xywh=gt_norm_xywh,
-    #     obj_mask=obj_mask,
-    # )
-    # pred_norm_xy = rearrange(out[:, 0: 4], pattern="b (n c) h w -> b (h w) c n", n=2)
-    # gt_norm_xy = gt_norm_xywh[:, :, :, 0: 2].repeat(1, 1, 2, 1)
-    # target = torch.where(resp_mask, gt_norm_xy, pred_norm_xy)
-    # target.requires_grad = False
-    # xy_loss = F.mse_loss(
-    #     pred_norm_xy,
-    #     target,
-    #     reduction="mean",
-    # )
-    # xy_loss
