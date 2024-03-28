@@ -4,7 +4,7 @@
 # "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
 # When testing on 2012 we also include the VOC 2007 test data for training."
 import sys
-sys.path.insert(0, "/Users/jongbeomkim//Desktop/workspace/YOLO")
+sys.path.insert(0, "/home/dmeta0304/Desktop/workspace/YOLO")
 import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
@@ -156,7 +156,7 @@ class VOC2012Dataset(Dataset):
             new_image, new_ltrb = self._shift_randomly(image=new_image, ltrb=new_ltrb)
             new_image, new_ltrb = self._crop_center(image=new_image, ltrb=new_ltrb)
             new_image = self._randomly_adjust_b_and_s(new_image)
-        draw_grids_and_bboxes(new_image, new_ltrb, cls_idx)
+        # draw_grids_and_bboxes(new_image, new_ltrb, cls_idx)
         new_image = TF.to_tensor(new_image)
         new_image = TF.normalize(
             new_image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284),
@@ -179,7 +179,7 @@ class VOC2012Dataset(Dataset):
         return torch.stack(
             [
                 xywh[..., 0] % self.cell_size / self.cell_size,
-                xywh[..., 0] % self.cell_size / self.cell_size,
+                xywh[..., 1] % self.cell_size / self.cell_size,
                 xywh[..., 2] / self.img_size,
                 xywh[..., 3] / self.img_size,
             ],
@@ -244,7 +244,9 @@ class VOC2012Dataset(Dataset):
     def __getitem__(self, idx):
         xml_path = self.xml_paths[idx]
         image, gt_ltrb, gt_cls_idx = self.parse_xml_file(xml_path)
-        image, gt_ltrb = self.transform_image_and_ltrb(image=image, ltrb=gt_ltrb, cls_idx=gt_cls_idx)
+        image, gt_ltrb = self.transform_image_and_ltrb(
+            image=image, ltrb=gt_ltrb, cls_idx=gt_cls_idx,
+        )
 
         valid_indices, row_idx = self.ltrb_to_row_index(gt_ltrb)
         gt_norm_xywh = self.ltrb_to_deduplicated_norm_xywh(
@@ -259,10 +261,10 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(
-        annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        annot_dir="/home/dmeta0304/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=6, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)

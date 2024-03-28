@@ -223,7 +223,6 @@ def draw_grids_and_bboxes(image, ltrb, cls_idx, img_size=448, n_cells=7, alpha=0
         r = int(r.item())
         b = int(b.item())
         idx = int(idx.item())
-        print(l, t, r, b)
         cv2.rectangle(img=img, pt1=(l, t), pt2=(r, b), color=COLORS[idx], thickness=2)
         cv2.circle(
             img=img,
