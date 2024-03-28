@@ -297,30 +297,46 @@ class YOLOv1(nn.Module):
 
     @torch.inference_mode()
     def draw_pred(self, image, out, obj_mask, padding=1):
-        pred_ltrb = self.model_output_to_ltrb(out)
-        pred_cls_prob = self.model_output_to_classification_prob(out)
+        out = model(image)
+        pred_ltrb = model.model_output_to_ltrb(out)
+        pred_cls_prob = model.model_output_to_classification_prob(out)
+        pred_cls_idx = torch.argmax(pred_cls_prob, dim=-1, keepdim=True)
 
+        pred_conf = model.model_output_to_confidence(out)
+        max_conf, max_conf_idx = torch.max(pred_conf, dim=2, keepdim=True)
+
+        sel_pred_ltrb = torch.gather(
+            pred_ltrb, dim=2, index=max_conf_idx.repeat(1, 1, 1, 4),
+        )
+        sel_pred_ltrb.shape, pred_cls_idx.shape
+
+        conf_mask = (max_conf >= 0.5)
+
+        masked_ltrb = sel_pred_ltrb[conf_mask.repeat(1, 1, 1, 4)].view(-1, 4)
+        masked_pred_cls_idx = pred_cls_idx[conf_mask].view(-1, 1)
+
+        padding = 1
         batch_size = image.size(0)
         n_cols = int(batch_size ** 0.5)
         img = np.array(image_to_grid(image, n_cols=n_cols, padding=padding))
         for batch_idx in range(batch_size):
-            pred_ltrb_batch = pred_ltrb[:, :, 0, :][batch_idx]
-            obj_mask_batch = obj_mask[:, :, 0, 0][batch_idx]
-            pred_cls_prob_batch = pred_cls_prob[:, :, 0, :][batch_idx]
-            pred_cls_idx_batch = torch.argmax(pred_cls_prob_batch[obj_mask_batch], dim=-1)
+            sel_pred_ltrb_batch = sel_pred_ltrb[batch_idx]
+            conf_mask_batch = conf_mask[batch_idx]
+            pred_cls_idx_batch = pred_cls_idx[batch_idx]
 
-            # print(pred_xywh[:, :, 0, :][batch_idx][obj_mask_batch])
-            # print(pred_ltrb_batch[obj_mask_batch])
             for (l, t, r, b), cls_idx in zip(
-                pred_ltrb_batch[obj_mask_batch], pred_cls_idx_batch,
+                sel_pred_ltrb_batch[conf_mask_batch.repeat(1, 1, 4)].view(-1, 4),
+                pred_cls_idx_batch[conf_mask_batch].view(-1, 1),
             ):
                 row_idx = batch_idx // n_cols
                 col_idx = batch_idx % n_cols
-                l = int(l.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
-                t = int(t.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
-                r = int(r.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
-                b = int(b.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
+                l = int(l.item()) + (col_idx * model.img_size) + ((col_idx + 1) * padding)
+                t = int(t.item()) + (row_idx * model.img_size) + ((row_idx + 1) * padding)
+                r = int(r.item()) + (col_idx * model.img_size) + ((col_idx + 1) * padding)
+                b = int(b.item()) + (row_idx * model.img_size) + ((row_idx + 1) * padding)
                 cls_idx = int(cls_idx.item())
+                
+                l, t, r, b
 
                 if l != r:
                     cv2.rectangle(
@@ -339,36 +355,36 @@ class YOLOv1(nn.Module):
 if __name__ == "__main__":
     from torch.optim import SGD, AdamW
 
-    DEVICE = torch.device("cpu")
+    DEVICE = torch.device("cuda")
 
-    model = YOLOv1().to(DEVICE)
+    # model = YOLOv1().to(DEVICE)
+    # # del model
 
-    optim = AdamW(model.parameters(), lr=0.0001)
+    # optim = AdamW(model.parameters(), lr=0.0001)
 
-    image = image.to(DEVICE)
-    gt_norm_xywh = gt_norm_xywh.to(DEVICE)
-    gt_cls_prob = gt_cls_prob.to(DEVICE)
-    obj_mask = obj_mask.to(DEVICE)
+    # image = image.to(DEVICE)
+    # gt_norm_xywh = gt_norm_xywh.to(DEVICE)
+    # gt_cls_prob = gt_cls_prob.to(DEVICE)
+    # obj_mask = obj_mask.to(DEVICE)
 
-    for _ in range(14):
-        loss = model.get_loss(
-            image=image,
-            gt_norm_xywh=gt_norm_xywh,
-            gt_cls_prob=gt_cls_prob,
-            obj_mask=obj_mask,
-        )
-        print(f"{loss.item():.3f}")
-        # print(gt_cls_prob.sum())
-        optim.zero_grad()
-        loss.backward()
-        optim.step()
+    # for _ in range(30):
+    #     loss = model.get_loss(
+    #         image=image,
+    #         gt_norm_xywh=gt_norm_xywh,
+    #         gt_cls_prob=gt_cls_prob,
+    #         obj_mask=obj_mask,
+    #     )
+    #     print(f"{loss.item():.3f}")
+    #     # print(gt_cls_prob.sum())
+    #     optim.zero_grad()
+    #     loss.backward()
+    #     optim.step()
+
+    # model.draw_gt(
+    #     image=image,
+    #     gt_norm_xywh=gt_norm_xywh,
+    #     gt_cls_prob=gt_cls_prob,
+    #     obj_mask=obj_mask,
+    # )
 
 
-    model.draw_gt(
-        image=image,
-        gt_norm_xywh=gt_norm_xywh,
-        gt_cls_prob=gt_cls_prob,
-        obj_mask=obj_mask,
-    )
-    out = model(image)
-    model.draw_pred(image, out, obj_mask)
