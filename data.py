@@ -264,7 +264,7 @@ if __name__ == "__main__":
         annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=16, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)
