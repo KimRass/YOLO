@@ -20,23 +20,30 @@ LEAKY_RELU_SLOPE = 0.1
 
 class ConvBlock(nn.Module):
     def __init__(
-        self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True,
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        bias=True,
     ):
         super().__init__()
 
-        self.conv = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            bias=bias
+        self.layers = nn.Sequential(
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride,
+                padding,
+                bias=bias
+            ),
+            nn.LeakyReLU(negative_slope=LEAKY_RELU_SLOPE),
         )
     
     def forward(self, x):
-        x = self.conv(x)
-        x = F.leaky_relu(x, negative_slope=LEAKY_RELU_SLOPE)
-        return x
+        return self.layers(x)
 
 
 class Darknet(nn.Module):
@@ -46,36 +53,36 @@ class Darknet(nn.Module):
         layers = list()
         layers.extend(
             [
-                ConvBlock(3, 64, kernel_size=7, stride=2, padding=3), # "7×7×64-s-2", conv1_1
-                nn.MaxPool2d(kernel_size=2, stride=2), # "2×2×s-2"
-                ConvBlock(64, 192, kernel_size=3, padding=1), # "3×3×192", conv2_1
-                nn.MaxPool2d(kernel_size=2, stride=2), # "2×2×s-2"
-                ConvBlock(192, 128, kernel_size=1), # "1×1×128", conv3_1
-                ConvBlock(128, 256, kernel_size=3, padding=1),  # "3×3×256", conv3_2
-                ConvBlock(256, 256, kernel_size=1), # "1×1×256", conv3_3
-                ConvBlock(256, 512, kernel_size=3, padding=1), # "3×3×512", conv3_4
-                nn.MaxPool2d(kernel_size=2, stride=2), # "2×2×s-2"        
+                ConvBlock(3, 64, 7, 2, 3), # "7×7×64-s-2", conv1_1
+                nn.MaxPool2d(2, 2), # "2×2×s-2"
+                ConvBlock(64, 192, 3, 1, 1), # "3×3×192", conv2_1
+                nn.MaxPool2d(2, 2), # "2×2×s-2"
+                ConvBlock(192, 128, 1, 1, 0), # "1×1×128", conv3_1
+                ConvBlock(128, 256, 3, 1, 1),  # "3×3×256", conv3_2
+                ConvBlock(256, 256, 1, 1, 0), # "1×1×256", conv3_3
+                ConvBlock(256, 512, 3, 1, 1), # "3×3×512", conv3_4
+                nn.MaxPool2d(2, 2), # "2×2×s-2"        
             ]
         )
         for _ in range(4): # "×4"
             layers.extend(
                 [
-                    ConvBlock(512, 256, kernel_size=1), # "1×1×256", conv4_1
-                    ConvBlock(256, 512, kernel_size=3, padding=1), # "3×3×512", conv4_2
+                    ConvBlock(512, 256, 1, 1, 0), # "1×1×256", conv4_1
+                    ConvBlock(256, 512, 3, 1, 1), # "3×3×512", conv4_2
                 ]
             )
         layers.extend(
             [
-                ConvBlock(512, 512, kernel_size=1), # "1×1×512", conv4_3
-                ConvBlock(512, 1024, kernel_size=3, padding=1), # "3×3×1024", conv4_4
-                nn.MaxPool2d(kernel_size=2, stride=2), # "2×2×s-2"
+                ConvBlock(512, 512, 1, 1, 0), # "1×1×512", conv4_3
+                ConvBlock(512, 1024, 3, 1, 1), # "3×3×1024", conv4_4
+                nn.MaxPool2d(2, 2), # "2×2×s-2"
             ]
         )
         for _ in range(2): # "×2"
             layers.extend(
                 [
-                    ConvBlock(1024, 512, kernel_size=1), # "1×1×512", conv5_1
-                    ConvBlock(512, 1024, kernel_size=3, padding=1), # "3×3×1024", conv5_2
+                    ConvBlock(1024, 512, 1, 1, 0), # "1×1×512", conv5_1
+                    ConvBlock(512, 1024, 3, 1, 1), # "3×3×1024", conv5_2
                 ]
             )
         self.layers = nn.Sequential(*layers)
@@ -161,7 +168,9 @@ class YOLOv1(nn.Module):
         return torch.stack([l, t, r, b], dim=-1)
 
     def get_ltrb(self, out):
-        pred_norm_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
+        pred_norm_xywh = rearrange(
+            out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4,
+        )
         pred_xywh = self.denormalize_xywh(pred_norm_xywh)
         return self.xywh_to_ltrb(pred_xywh)
 
@@ -184,58 +193,72 @@ class YOLOv1(nn.Module):
         gt_ltrb = self.xywh_to_ltrb(gt_xywh)
 
         iou = get_iou(pred_ltrb, gt_ltrb)
-        _, idx_max = torch.max(iou, dim=2, keepdim=False)
+        _, max_iou_idx = torch.max(iou, dim=2, keepdim=False)
         iou_mask = F.one_hot(
-            idx_max[:, :, 0], num_classes=self.n_bboxes,
+            max_iou_idx[:, :, 0], num_classes=self.n_bboxes,
         )[:, :, :, None].bool()
         return iou_mask * obj_mask.repeat(1, 1, self.n_bboxes, 1)
 
     def get_coordinate_loss(self, out, gt_norm_xywh, resp_mask):
-        pred_norm_xy = rearrange(out[:, 0: 4], pattern="b (n c) h w -> b (h w) c n", n=2)
+        pred_norm_xy = rearrange(
+            out[:, 0: 4], pattern="b (n c) h w -> b (h w) c n", n=2,
+        )
         gt_norm_xy = gt_norm_xywh[:, :, :, 0: 2].repeat(1, 1, 2, 1).detach()
         xy_loss = F.mse_loss(
             pred_norm_xy,
             torch.where(resp_mask, gt_norm_xy, pred_norm_xy),
-            reduction="mean",
+            # reduction="mean",
+            reduction="sum",
         )
-        pred_norm_wh = rearrange(out[:, 4: 8], pattern="b (n c) h w -> b (h w) c n", n=2)
+        pred_norm_wh = rearrange(
+            out[:, 4: 8], pattern="b (n c) h w -> b (h w) c n", n=2,
+        )
         gt_norm_wh = gt_norm_xywh[:, :, :, 2: 4].repeat(1, 1, 2, 1).detach()
         wh_loss = F.mse_loss(
             pred_norm_wh,
             torch.where(resp_mask, gt_norm_wh, pred_norm_wh),
-            reduction="mean",
+            # reduction="mean",
+            reduction="sum",
         )
         return self.coord_coeff * (xy_loss + wh_loss)
 
     @staticmethod
     def get_confidence(out):
-        return rearrange(out[:, 8: 10], pattern="b (n c) h w -> b (h w) c n", n=1)
+        return rearrange(
+            out[:, 8: 10], pattern="b (n c) h w -> b (h w) c n", n=1,
+        )
 
     def get_confidence_loss(self, out, resp_mask):
         pred_conf = self.get_confidence(out)
         obj_conf_loss = F.mse_loss(
             pred_conf,
             torch.where(resp_mask, torch.ones_like(pred_conf), pred_conf),
-            reduction="mean",
+            # reduction="mean",
+            reduction="sum",
         )
         noobj_conf_loss = self.noobj_coeff * F.mse_loss(
             pred_conf,
             torch.where(~resp_mask, torch.zeros_like(pred_conf), pred_conf),
-            reduction="mean",
+            # reduction="mean",
+            reduction="sum",
         )
+        print(f"{obj_conf_loss.item():.3f} {noobj_conf_loss.item():.3f}")
         return obj_conf_loss + noobj_conf_loss
 
     def get_classification_prob(self, out):
         return F.softmax(
             rearrange(
-                out[:, 10: 30], pattern="b (n c) h w -> b (h w) c n", n=self.n_classes,
+                out[:, 10: 30],
+                pattern="b (n c) h w -> b (h w) c n",
+                n=self.n_classes,
             ),
             dim=-1,
         )
 
     def get_classification_loss(self, out, gt_cls_prob):
         pred_cls_prob = self.get_classification_prob(out)
-        return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="mean")
+        # return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="mean")
+        return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="sum")
 
     def get_loss(self, image, gt_norm_xywh, gt_cls_prob, obj_mask):
         """
@@ -256,6 +279,7 @@ class YOLOv1(nn.Module):
         )
         conf_loss = self.get_confidence_loss(out, resp_mask=resp_mask)
         cls_loss = self.get_classification_loss(out, gt_cls_prob=gt_cls_prob)
+        # print(coord_loss.item(), conf_loss.item(), cls_loss.item())
         return coord_loss + conf_loss + cls_loss
 
     @staticmethod
@@ -272,7 +296,8 @@ class YOLOv1(nn.Module):
         image,
         gt_norm_xywh,
         gt_cls_prob,
-        obj_mask, mean,
+        obj_mask,
+        mean,
         std,
         padding=1,
     ):
@@ -300,19 +325,23 @@ class YOLOv1(nn.Module):
                 labels=[VOC_CLASSES[idx] for idx in cls_indices],
                 colors=[COLORS[idx] for idx in cls_indices],
                 width=2,
+                # font=Path(__file__).resolve().parent/"resources/NotoSans_Condensed-Medium.ttf",
+                # font_size=14,
             )
-            images.append(drawn_image)
+            images.append(drawn_image.cpu())
         grid = make_grid(
             torch.stack(images, dim=0),
             nrow=int(image.size(0) ** 0.5),
             padding=padding,
+            pad_value=255,
         )
         TF.to_pil_image(grid).show()
 
-    def get_confidence_mask(self, out):
+    def get_confidence_mask(self, out, conf_thresh):
         pred_conf = self.get_confidence(out)
+        print(pred_conf.max())
         max_conf, _ = torch.max(pred_conf, dim=2, keepdim=True)
-        return (max_conf >= 0.5)
+        return (max_conf >= conf_thresh)
 
     def get_max_confidence_ltrb(self, out):
         pred_ltrb = self.get_ltrb(out)
@@ -322,32 +351,36 @@ class YOLOv1(nn.Module):
             pred_ltrb, dim=2, index=max_conf_idx.repeat(1, 1, 1, 4),
         )
 
-    def get_classification_index(self, out):
+    def _get_classification_index(self, out):
         pred_cls_prob = self.get_classification_prob(out)
         return torch.argmax(pred_cls_prob, dim=-1, keepdim=True)
 
     @torch.inference_mode()
-    def draw_pred(self, image, out, mean, std, padding=1):
-        pred_cls_idx = model.get_classification_index(out)
-        conf_mask = model.get_confidence_mask(out)
-        pred_ltrb = model.get_max_confidence_ltrb(out)
+    def draw_pred(self, image, out, mean, std, conf_thresh=0.5, padding=1):
+        # out = model(image)
+        pred_ltrb = self.get_max_confidence_ltrb(out.cpu())
+        pred_cls_idx = self._get_classification_index(out.cpu())
+        # conf_thresh=0.1
+        conf_mask = self.get_confidence_mask(
+            out.cpu(), conf_thresh=conf_thresh,
+        )
 
         uint8_image = self.to_uint8(image, mean=mean, std=std)
         images = list()
         for batch_idx in range(image.size(0)):
+            # batch_idx=1
             pred_ltrb_batch = pred_ltrb[batch_idx]
-            conf_mask_batch = conf_mask[batch_idx]
             pred_cls_idx_batch = pred_cls_idx[batch_idx]
+            conf_mask_batch = conf_mask[batch_idx]
 
-            # ltrb = pred_ltrb_batch[conf_mask_batch.repeat(1, 1, 4)].view(-1, 4)
             boxes = torch.masked_select(
                 pred_ltrb_batch, mask=conf_mask_batch,
             ).view(-1, 4)
-            # cls_idx = pred_cls_idx_batch[conf_mask_batch].view(-1, 1)
+            # boxes
+
             cls_indices = torch.masked_select(
                 pred_cls_idx_batch, mask=conf_mask_batch,
             ).tolist()
-            # print(ltrb)
             drawn_image = draw_bounding_boxes(
                 image=uint8_image[batch_idx],
                 boxes=boxes,
@@ -355,11 +388,12 @@ class YOLOv1(nn.Module):
                 colors=[COLORS[idx] for idx in cls_indices],
                 width=2,
             )
-            images.append(drawn_image)
+            images.append(drawn_image.cpu())
         grid = make_grid(
             torch.stack(images, dim=0),
             nrow=int(image.size(0) ** 0.5),
             padding=padding,
+            pad_value=255,
         )
         TF.to_pil_image(grid).show()
 
@@ -367,9 +401,10 @@ class YOLOv1(nn.Module):
 if __name__ == "__main__":
     from torch.optim import SGD, AdamW
 
-    DEVICE = torch.device("cuda")
+    DEVICE = torch.device("mps")
 
     model = YOLOv1().to(DEVICE)
+    out = model(image)
 
     # model.draw_gt(
     #     image=image,
@@ -378,6 +413,7 @@ if __name__ == "__main__":
     #     obj_mask=obj_mask,
     #     mean=(0.457, 0.437, 0.404),
     #     std=(0.275, 0.271, 0.284),
+    #     padding=1,
     # )
 
     optim = AdamW(model.parameters(), lr=0.0001)
@@ -387,15 +423,14 @@ if __name__ == "__main__":
     gt_cls_prob = gt_cls_prob.to(DEVICE)
     obj_mask = obj_mask.to(DEVICE)
 
-    for _ in range(30):
+    for _ in range(24):
         loss = model.get_loss(
             image=image,
             gt_norm_xywh=gt_norm_xywh,
             gt_cls_prob=gt_cls_prob,
             obj_mask=obj_mask,
         )
-        print(f"{loss.item():.3f}")
-        # print(gt_cls_prob.sum())
+        # print(f"{loss.item():.3f}")
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -403,7 +438,8 @@ if __name__ == "__main__":
     out = model(image)
     model.draw_pred(
         image=image,
-        out=out,
+        out=out.cpu(),
         mean=(0.457, 0.437, 0.404),
         std=(0.275, 0.271, 0.284),
+        conf_thresh=0.5,
     )
