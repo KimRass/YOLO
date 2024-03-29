@@ -24,6 +24,8 @@ class VOC2012Dataset(Dataset):
         self,
         annot_dir,
         augment=True,
+        mean=(0.457, 0.437, 0.404),
+        std=(0.275, 0.271, 0.284),
         img_size=448,
         n_cells=7,
         n_bboxes=2,
@@ -33,6 +35,8 @@ class VOC2012Dataset(Dataset):
         super().__init__()
 
         self.augment = augment
+        self.mean = mean
+        self.std = std
         self.img_size = img_size
         self.n_cells = n_cells
         self.n_bboxes = n_bboxes
@@ -149,18 +153,15 @@ class VOC2012Dataset(Dataset):
         image = TF.adjust_saturation(image, random.uniform(0.5, 1.5))
         return image
 
-    def transform_image_and_ltrb(self, image, ltrb, cls_idx):
+    def transform_image_and_ltrb(self, image, ltrb):
         if self.augment:
             new_image, new_ltrb = self._flip_horizontal(image=image, ltrb=ltrb)
             new_image, new_ltrb = self._scale_randomly(image=new_image, ltrb=new_ltrb)
             new_image, new_ltrb = self._shift_randomly(image=new_image, ltrb=new_ltrb)
             new_image, new_ltrb = self._crop_center(image=new_image, ltrb=new_ltrb)
             new_image = self._randomly_adjust_b_and_s(new_image)
-        # draw_grids_and_bboxes(new_image, new_ltrb, cls_idx)
         new_image = TF.to_tensor(new_image)
-        new_image = TF.normalize(
-            new_image, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284),
-        )
+        new_image = TF.normalize(new_image, mean=self.mean, std=self.std)
         return new_image, new_ltrb
 
     @staticmethod
@@ -245,7 +246,7 @@ class VOC2012Dataset(Dataset):
         xml_path = self.xml_paths[idx]
         image, gt_ltrb, gt_cls_idx = self.parse_xml_file(xml_path)
         image, gt_ltrb = self.transform_image_and_ltrb(
-            image=image, ltrb=gt_ltrb, cls_idx=gt_cls_idx,
+            image=image, ltrb=gt_ltrb,
         )
 
         valid_indices, row_idx = self.ltrb_to_row_index(gt_ltrb)
@@ -264,7 +265,7 @@ if __name__ == "__main__":
         annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    dl = DataLoader(ds, batch_size=16, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=3, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)

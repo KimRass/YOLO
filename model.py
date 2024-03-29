@@ -8,9 +8,12 @@ import torch.nn.functional as F
 from einops import rearrange
 import cv2
 import numpy as np
+from torchvision.utils import draw_bounding_boxes
+from torchvision.utils import make_grid
+import torchvision.transforms.functional as TF
 
 from eval import get_iou
-from utils import COLORS, image_to_grid, to_pil
+from utils import VOC_CLASSES, COLORS, image_to_grid, to_pil, denorm
 
 LEAKY_RELU_SLOPE = 0.1
 
@@ -157,7 +160,7 @@ class YOLOv1(nn.Module):
         b = torch.clip(xywh[..., 1] + (xywh[..., 3] / 2), max=self.img_size)
         return torch.stack([l, t, r, b], dim=-1)
 
-    def model_output_to_ltrb(self, out):
+    def get_ltrb(self, out):
         pred_norm_xywh = rearrange(out[:, 0: 8], pattern="b (n c) h w -> b (h w) c n", n=4)
         pred_xywh = self.denormalize_xywh(pred_norm_xywh)
         return self.xywh_to_ltrb(pred_xywh)
@@ -175,7 +178,7 @@ class YOLOv1(nn.Module):
         Returns:
             _type_: _description_
         """
-        pred_ltrb = self.model_output_to_ltrb(out)
+        pred_ltrb = self.get_ltrb(out)
 
         gt_xywh = self.denormalize_xywh(gt_norm_xywh)
         gt_ltrb = self.xywh_to_ltrb(gt_xywh)
@@ -205,11 +208,11 @@ class YOLOv1(nn.Module):
         return self.coord_coeff * (xy_loss + wh_loss)
 
     @staticmethod
-    def model_output_to_confidence(out):
+    def get_confidence(out):
         return rearrange(out[:, 8: 10], pattern="b (n c) h w -> b (h w) c n", n=1)
 
     def get_confidence_loss(self, out, resp_mask):
-        pred_conf = self.model_output_to_confidence(out)
+        pred_conf = self.get_confidence(out)
         obj_conf_loss = F.mse_loss(
             pred_conf,
             torch.where(resp_mask, torch.ones_like(pred_conf), pred_conf),
@@ -222,7 +225,7 @@ class YOLOv1(nn.Module):
         )
         return obj_conf_loss + noobj_conf_loss
 
-    def model_output_to_classification_prob(self, out):
+    def get_classification_prob(self, out):
         return F.softmax(
             rearrange(
                 out[:, 10: 30], pattern="b (n c) h w -> b (h w) c n", n=self.n_classes,
@@ -231,15 +234,15 @@ class YOLOv1(nn.Module):
         )
 
     def get_classification_loss(self, out, gt_cls_prob):
-        pred_cls_prob = self.model_output_to_classification_prob(out)
+        pred_cls_prob = self.get_classification_prob(out)
         return F.mse_loss(pred_cls_prob, gt_cls_prob, reduction="mean")
 
     def get_loss(self, image, gt_norm_xywh, gt_cls_prob, obj_mask):
         """
-        gt_norm_xywh: [B, N, K, 4]
-        gt_cls_prob: [B, N, K, 1]
-            L: n_bboxes (2)
-            K: n_bboxes_per_cell (1)
+        gt_norm_xywh: Tensor of shape (B, N, K, 4).
+        gt_cls_prob: Tensor of shape (B, N, K, 1).
+            L: `self.n_bboxes` (equals to 2)
+            K: `self.n_bboxes_per_cell` (equals to 1)
         """
         out = self(image)
 
@@ -255,97 +258,110 @@ class YOLOv1(nn.Module):
         cls_loss = self.get_classification_loss(out, gt_cls_prob=gt_cls_prob)
         return coord_loss + conf_loss + cls_loss
 
-    @torch.inference_mode()
-    def draw_gt(self, image, gt_norm_xywh, gt_cls_prob, obj_mask, padding=1):
-        gt_xywh = model.denormalize_xywh(gt_norm_xywh)
-        gt_ltrb = model.xywh_to_ltrb(gt_xywh)
+    @staticmethod
+    def to_uint8(image, mean, std):
+        return (denorm(image, mean=mean, std=std) * 255).byte()
 
-        batch_size = image.size(0)
-        n_cols = int(batch_size ** 0.5)
-        img = np.array(image_to_grid(image, n_cols=n_cols, padding=padding))
-        for batch_idx in range(batch_size):
-            gt_ltrb_batch = gt_ltrb[:, :, 0, :][batch_idx]
-            obj_mask_batch = obj_mask[:, :, 0, 0][batch_idx]
-            gt_cls_prob_batch = gt_cls_prob[:, :, 0, :][batch_idx]
-            gt_cls_idx_batch = torch.argmax(gt_cls_prob_batch[obj_mask_batch], dim=-1)
-
-            # print(gt_xywh[:, :, 0, :][batch_idx][obj_mask_batch])
-            # print(gt_ltrb_batch[obj_mask_batch])
-            for (l, t, r, b), cls_idx in zip(
-                gt_ltrb_batch[obj_mask_batch], gt_cls_idx_batch,
-            ):
-                row_idx = batch_idx // n_cols
-                col_idx = batch_idx % n_cols
-                l = int(l.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
-                t = int(t.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
-                r = int(r.item()) + (col_idx * self.img_size) + ((col_idx + 1) * padding)
-                b = int(b.item()) + (row_idx * self.img_size) + ((row_idx + 1) * padding)
-                cls_idx = int(cls_idx.item())
-
-                if l != r:
-                    cv2.rectangle(
-                        img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=2,
-                    )
-                    cv2.circle(
-                        img=img,
-                        center=((l + r) // 2, (t + b) // 2),
-                        radius=1,
-                        color=COLORS[cls_idx],
-                        thickness=2,
-                    )
-        to_pil(img).show()
+    @staticmethod
+    def prob_to_index(prob):
+        return torch.argmax(prob, dim=-1, keepdim=True)
 
     @torch.inference_mode()
-    def draw_pred(self, image, out, obj_mask, padding=1):
-        out = model(image)
-        pred_ltrb = model.model_output_to_ltrb(out)
-        pred_cls_prob = model.model_output_to_classification_prob(out)
-        pred_cls_idx = torch.argmax(pred_cls_prob, dim=-1, keepdim=True)
+    def draw_gt(
+        self,
+        image,
+        gt_norm_xywh,
+        gt_cls_prob,
+        obj_mask, mean,
+        std,
+        padding=1,
+    ):
+        gt_xywh = self.denormalize_xywh(gt_norm_xywh)
+        gt_ltrb = self.xywh_to_ltrb(gt_xywh)
+        gt_cls_idx = self.prob_to_index(gt_cls_prob)
 
-        pred_conf = model.model_output_to_confidence(out)
-        max_conf, max_conf_idx = torch.max(pred_conf, dim=2, keepdim=True)
-        max_conf_idx.shape
+        uint8_image = self.to_uint8(image, mean=mean, std=std)
+        images = list()
+        for batch_idx in range(image.size(0)):
+            obj_mask_batch = obj_mask[batch_idx]
 
-        sel_pred_ltrb = torch.gather(
+            gt_ltrb_batch = gt_ltrb[batch_idx]
+            gt_cls_idx_batch = gt_cls_idx[batch_idx]
+
+            boxes = torch.masked_select(
+                gt_ltrb_batch, mask=obj_mask_batch,
+            ).view(-1, 4)
+            cls_indices = torch.masked_select(
+                gt_cls_idx_batch, mask=obj_mask_batch,
+            ).tolist()
+            drawn_image = draw_bounding_boxes(
+                image=uint8_image[batch_idx],
+                boxes=boxes,
+                labels=[VOC_CLASSES[idx] for idx in cls_indices],
+                colors=[COLORS[idx] for idx in cls_indices],
+                width=2,
+            )
+            images.append(drawn_image)
+        grid = make_grid(
+            torch.stack(images, dim=0),
+            nrow=int(image.size(0) ** 0.5),
+            padding=padding,
+        )
+        TF.to_pil_image(grid).show()
+
+    def get_confidence_mask(self, out):
+        pred_conf = self.get_confidence(out)
+        max_conf, _ = torch.max(pred_conf, dim=2, keepdim=True)
+        return (max_conf >= 0.5)
+
+    def get_max_confidence_ltrb(self, out):
+        pred_ltrb = self.get_ltrb(out)
+        pred_conf = self.get_confidence(out)
+        _, max_conf_idx = torch.max(pred_conf, dim=2, keepdim=True)
+        return torch.gather(
             pred_ltrb, dim=2, index=max_conf_idx.repeat(1, 1, 1, 4),
         )
 
-        conf_mask = (max_conf >= 0.5)
+    def get_classification_index(self, out):
+        pred_cls_prob = self.get_classification_prob(out)
+        return torch.argmax(pred_cls_prob, dim=-1, keepdim=True)
 
-        sel_pred_ltrb.shape
-        padding = 1
-        batch_size = image.size(0)
-        n_cols = int(batch_size ** 0.5)
-        img = np.array(image_to_grid(image, n_cols=n_cols, padding=padding))
-        for batch_idx in range(batch_size):
-            sel_pred_ltrb_batch = sel_pred_ltrb[batch_idx]
+    @torch.inference_mode()
+    def draw_pred(self, image, out, mean, std, padding=1):
+        pred_cls_idx = model.get_classification_index(out)
+        conf_mask = model.get_confidence_mask(out)
+        pred_ltrb = model.get_max_confidence_ltrb(out)
+
+        uint8_image = self.to_uint8(image, mean=mean, std=std)
+        images = list()
+        for batch_idx in range(image.size(0)):
+            pred_ltrb_batch = pred_ltrb[batch_idx]
             conf_mask_batch = conf_mask[batch_idx]
             pred_cls_idx_batch = pred_cls_idx[batch_idx]
 
-            ltrb = sel_pred_ltrb_batch[conf_mask_batch.repeat(1, 1, 4)].view(-1, 4)
-            print(ltrb)
-            cls_idx = pred_cls_idx_batch[conf_mask_batch].view(-1, 1)
-            for (l, t, r, b), cls_idx in zip(ltrb, cls_idx):
-                row_idx = batch_idx // n_cols
-                col_idx = batch_idx % n_cols
-                l = int(l.item()) + (col_idx * model.img_size) + ((col_idx + 1) * padding)
-                t = int(t.item()) + (row_idx * model.img_size) + ((row_idx + 1) * padding)
-                r = int(r.item()) + (col_idx * model.img_size) + ((col_idx + 1) * padding)
-                b = int(b.item()) + (row_idx * model.img_size) + ((row_idx + 1) * padding)
-                cls_idx = int(cls_idx.item())
-
-                if l != r:
-                    cv2.rectangle(
-                        img=img, pt1=(l, t), pt2=(r, b), color=COLORS[cls_idx], thickness=2,
-                    )
-                    cv2.circle(
-                        img=img,
-                        center=((l + r) // 2, (t + b) // 2),
-                        radius=1,
-                        color=COLORS[cls_idx],
-                        thickness=2,
-                    )
-            to_pil(img).show()
+            # ltrb = pred_ltrb_batch[conf_mask_batch.repeat(1, 1, 4)].view(-1, 4)
+            boxes = torch.masked_select(
+                pred_ltrb_batch, mask=conf_mask_batch,
+            ).view(-1, 4)
+            # cls_idx = pred_cls_idx_batch[conf_mask_batch].view(-1, 1)
+            cls_indices = torch.masked_select(
+                pred_cls_idx_batch, mask=conf_mask_batch,
+            ).tolist()
+            # print(ltrb)
+            drawn_image = draw_bounding_boxes(
+                image=uint8_image[batch_idx],
+                boxes=boxes,
+                labels=[VOC_CLASSES[idx] for idx in cls_indices],
+                colors=[COLORS[idx] for idx in cls_indices],
+                width=2,
+            )
+            images.append(drawn_image)
+        grid = make_grid(
+            torch.stack(images, dim=0),
+            nrow=int(image.size(0) ** 0.5),
+            padding=padding,
+        )
+        TF.to_pil_image(grid).show()
 
 
 if __name__ == "__main__":
@@ -354,7 +370,15 @@ if __name__ == "__main__":
     DEVICE = torch.device("cuda")
 
     model = YOLOv1().to(DEVICE)
-    # del model
+
+    # model.draw_gt(
+    #     image=image,
+    #     gt_norm_xywh=gt_norm_xywh,
+    #     gt_cls_prob=gt_cls_prob,
+    #     obj_mask=obj_mask,
+    #     mean=(0.457, 0.437, 0.404),
+    #     std=(0.275, 0.271, 0.284),
+    # )
 
     optim = AdamW(model.parameters(), lr=0.0001)
 
@@ -376,9 +400,10 @@ if __name__ == "__main__":
         loss.backward()
         optim.step()
 
-    model.draw_gt(
+    out = model(image)
+    model.draw_pred(
         image=image,
-        gt_norm_xywh=gt_norm_xywh,
-        gt_cls_prob=gt_cls_prob,
-        obj_mask=obj_mask,
+        out=out,
+        mean=(0.457, 0.437, 0.404),
+        std=(0.275, 0.271, 0.284),
     )

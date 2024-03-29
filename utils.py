@@ -198,6 +198,7 @@ def denorm(x, mean=(0.457, 0.437, 0.404), std=(0.275, 0.271, 0.284)):
     )
 
 
+@torch.inference_mode()
 def image_to_grid(image, n_cols, padding=1, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)):
     tensor = image.clone().detach().cpu()
     tensor = denorm(tensor, mean=mean, std=std)

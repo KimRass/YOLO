@@ -20,9 +20,9 @@ def get_dtype(bbox):
 def get_area(bbox):
     """
     args:
-        bbox: [B, C, N, 4]
+        bbox: Tensor of shape (B, C, N, 4)
     returns:
-        [B, C, N]
+        Tensor of shape (B, C, N)
     """
     dtype = get_dtype(bbox)
     return torch.clip(
@@ -33,10 +33,10 @@ def get_area(bbox):
 def get_intersection_area(bbox1, bbox2):
     """
     args:
-        bbox1: [B, C, N, 4]
-        bbox2: [B, C, M, 4]
+        bbox1: Tensor of shape (B, C, N, 4)
+        bbox2: Tensor of shape (B, C, M, 4)
     returns:
-        [B, C, N, M]
+        Tensor of shape (B, C, N, M)
     """
     dtype = get_dtype(bbox1)
     l = torch.maximum(bbox1[:, :, :, 0][:, :, :, None], bbox2[:, :, :, 0][:, :, None, :])
@@ -49,10 +49,10 @@ def get_intersection_area(bbox1, bbox2):
 def get_iou(bbox1, bbox2):
     """
     args:
-        bbox1: [B, C, N, 4]
-        bbox2: [B, C, M, 4]
+        bbox1: Tensor of shape (B, C, N, 4)
+        bbox2: Tensor of shape (B, C, M, 4)
     returns:
-        [B, C, N, M]
+        Tensor of shape (B, C, N, M)
     """
     bbox1_area = get_area(bbox1)
     bbox2_area = get_area(bbox2)
@@ -82,14 +82,9 @@ def get_giou(bbox1, bbox2):
 def get_accum_prec_and_recall(pred, gt, cls_idx, iou_thresh):
     """
     Args:
-        gt (
-            `torch.Tensor` with shape (B1, 5)
-            (Left, Top, Right, Bottom, Class)
-        )
-        pred (
-            `torch.Tensor` with shape (B2, 6)
+        pred: Tensor of shape (B2, 6)
             (Left, Top, Right, Bottom, Confidence, Class)
-        )
+        gt: Tensor of shape (B1, 5) (Left, Top, Right, Bottom, Class)
     """
     assert gt.size(1) == 5
     assert pred.size(1) == 6
