@@ -4,7 +4,8 @@
 # "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
 # When testing on 2012 we also include the VOC 2007 test data for training."
 import sys
-sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO")
+# sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO")
+sys.path.insert(0, "/home/jbkim/Desktop/workspace/YOLO")
 import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
@@ -261,11 +262,13 @@ class VOC2012Dataset(Dataset):
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(
-        annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        # annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    dl = DataLoader(ds, batch_size=3, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
     di = iter(dl)
 
     image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)
     # image.shape, gt_norm_xywh.shape, gt_cls_prob.shape, obj_mask.shape
+    # obj_mask.sum()

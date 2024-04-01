@@ -15,7 +15,8 @@ def get_dtype(bbox):
     if bbox.device.type == "mps":
         return torch.float32
     else:
-        return torch.float64
+        # return torch.float64
+        return torch.float32
 
 def get_area(bbox):
     """
