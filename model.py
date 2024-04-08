@@ -430,34 +430,23 @@ if __name__ == "__main__":
     model = YOLOv1().to(DEVICE)
     
     image = image.to(DEVICE)
-    gt_norm_xywh = gt_norm_xywh.to(DEVICE)
-    gt_cls_prob = gt_cls_prob.to(DEVICE)
-    obj_mask = obj_mask.to(DEVICE)
+    annot = {k: v.to(DEVICE) for k, v in annot.items()}
 
-    # model.draw_gt(
-    #     image=image,
-    #     gt_norm_xywh=gt_norm_xywh,
-    #     gt_cls_prob=gt_cls_prob,
-    #     obj_mask=obj_mask,
-    #     mean=(0.457, 0.437, 0.404),
-    #     std=(0.275, 0.271, 0.284),
-    #     padding=1,
-    # )
-
-    optim = AdamW(model.parameters(), lr=0.0001)
-    for _ in range(60):
-        loss = model.get_loss(
-            image=image,
-            gt_norm_xywh=gt_norm_xywh,
-            gt_cls_prob=gt_cls_prob,
-            obj_mask=obj_mask,
-        )
-        # print(f"{loss.item():.3f}")
-        optim.zero_grad()
-        loss.backward()
-        optim.step()
+    # optim = AdamW(model.parameters(), lr=0.0001)
+    # for _ in range(60):
+    #     loss = model.get_loss(
+    #         image=image,
+    #         gt_norm_xywh=gt_norm_xywh,
+    #         gt_cls_prob=gt_cls_prob,
+    #         obj_mask=obj_mask,
+    #     )
+    #     # print(f"{loss.item():.3f}")
+    #     optim.zero_grad()
+    #     loss.backward()
+    #     optim.step()
 
     out = model(image)
+    out.shape
 
     
     # mean=(0.457, 0.437, 0.404)

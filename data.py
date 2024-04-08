@@ -74,7 +74,7 @@ class VOC2012Dataset(Dataset):
         )
 
     @staticmethod
-    def get_cls_idx_from_xml_path(xml_path):
+    def get_label_from_xml_path(xml_path):
         xtree = et.parse(xml_path)
         xroot = xtree.getroot()
         return torch.tensor(
@@ -91,8 +91,8 @@ class VOC2012Dataset(Dataset):
         # print(xml_path)
         image = self.get_image_from_xml_path(xml_path)
         ltrb = self.get_ltrb_from_xml_path(xml_path)
-        cls_idx = self.get_cls_idx_from_xml_path(xml_path)
-        return image, ltrb, cls_idx
+        label = self.get_label_from_xml_path(xml_path)
+        return image, ltrb, label
 
     def _flip_horizontal(self, image, ltrb, p=0.5):
         ori_w, _ = image.size
@@ -164,6 +164,12 @@ class VOC2012Dataset(Dataset):
         new_image = TF.normalize(new_image, mean=self.mean, std=self.std)
         return new_image, new_ltrb
 
+    def __getitem__(self, idx):
+        xml_path = self.xml_paths[idx]
+        image, gt_ltrb, label = self.parse_xml_file(xml_path)
+        image, gt_ltrb = self.transform_image_and_ltrb(image=image, ltrb=gt_ltrb)
+        return image, {"ltrb": gt_ltrb, "label": label}
+
     @staticmethod
     def ltrb_to_xywh(ltrb):
         return torch.stack(
@@ -231,8 +237,8 @@ class VOC2012Dataset(Dataset):
         new_gt_norm_xywh = new_gt_norm_xywh[:, None, :]
         return new_gt_norm_xywh
 
-    def class_index_to_class_prob(self, cls_idx, valid_indices, row_idx):
-        gt_cls_prob = F.one_hot(cls_idx, num_classes=self.n_classes).float()
+    def class_index_to_class_prob(self, label, valid_indices, row_idx):
+        gt_cls_prob = F.one_hot(label, num_classes=self.n_classes).float()
         dedup_gt_cls_prob = gt_cls_prob[valid_indices]
         new_gt_cls_prob = torch.zeros(
             size=((self.n_cells ** 2) * self.n_bboxes_per_cell, self.n_classes),
@@ -242,22 +248,12 @@ class VOC2012Dataset(Dataset):
         new_gt_cls_prob = new_gt_cls_prob[:, None, :]
         return new_gt_cls_prob
 
-    def __getitem__(self, idx):
-        xml_path = self.xml_paths[idx]
-        image, gt_ltrb, gt_cls_idx = self.parse_xml_file(xml_path)
-        image, gt_ltrb = self.transform_image_and_ltrb(
-            image=image, ltrb=gt_ltrb,
-        )
 
-        valid_indices, row_idx = self.ltrb_to_row_index(gt_ltrb)
-        gt_norm_xywh = self.ltrb_to_deduplicated_norm_xywh(
-            ltrb=gt_ltrb, valid_indices=valid_indices, row_idx=row_idx,
-        )
-        gt_cls_prob = self.class_index_to_class_prob(
-            cls_idx=gt_cls_idx, valid_indices=valid_indices, row_idx=row_idx,
-        )
-        obj_mask = self.row_index_to_obj_mask(row_idx)
-        return image, gt_norm_xywh, gt_cls_prob, obj_mask
+def collate_fn(batch):
+    images = list()
+    for image, annot in batch:
+        images.append(image)
+    return torch.stack(images, dim=0), annot
 
 
 if __name__ == "__main__":
@@ -266,9 +262,17 @@ if __name__ == "__main__":
         annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
-    dl = DataLoader(ds, batch_size=1, num_workers=0, pin_memory=True, drop_last=True)
+    dl = DataLoader(
+        ds,
+        batch_size=4,
+        num_workers=0,
+        pin_memory=True,
+        drop_last=True,
+        collate_fn=collate_fn,
+    )
     di = iter(dl)
 
-    image, gt_norm_xywh, gt_cls_prob, obj_mask = next(di)
-    # image.shape, gt_norm_xywh.shape, gt_cls_prob.shape, obj_mask.shape
-    # obj_mask.sum()
+    image, annot = next(di)
+    # image.shape, annot["ltrb"].shape, annot["label"].shape
+    # annot["ltrb"]
+    # annot["label"]
