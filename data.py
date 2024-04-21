@@ -4,8 +4,8 @@
 # "We train the network on the training and validation data sets from PASCAL VOC 2007 and 2012.
 # When testing on 2012 we also include the VOC 2007 test data for training."
 import sys
-# sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO")
-sys.path.insert(0, "/home/jbkim/Desktop/workspace/YOLO")
+sys.path.insert(0, "/Users/jongbeomkim/Desktop/workspace/YOLO")
+# sys.path.insert(0, "/home/jbkim/Desktop/workspace/YOLO")
 import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
@@ -42,9 +42,7 @@ class VOC2012Dataset(Dataset):
         self.n_bboxes = n_bboxes
         self.n_bboxes_per_cell = n_bboxes_per_cell
         self.n_classes = n_classes
-
         self.cell_size = img_size // n_cells
-
         self.xml_paths = list(Path(annot_dir).glob("*.xml"))
 
     def __len__(self):
@@ -54,7 +52,9 @@ class VOC2012Dataset(Dataset):
     def get_image_from_xml_path(xml_path):
         xtree = et.parse(xml_path)
         xroot = xtree.getroot()
-        img_path = Path(xml_path).parent.parent/"JPEGImages"/xroot.find("filename").text
+        img_path = (
+            Path(xml_path).parent.parent/"JPEGImages"
+        )/xroot.find("filename").text
         return Image.open(img_path).convert("RGB")
 
     @staticmethod
@@ -146,8 +146,8 @@ class VOC2012Dataset(Dataset):
 
     def _randomly_adjust_b_and_s(self, image):
         """
-        "We also randomly adjust the exposure and saturation of the image by up to a factor
-        of 1.5 in the HSV color space."
+        "We also randomly adjust the exposure and saturation of the image
+        by up to a factor of 1.5 in the HSV color space."
         """
         image = TF.adjust_brightness(image, random.uniform(0.5, 1.5))
         image = TF.adjust_saturation(image, random.uniform(0.5, 1.5))
@@ -156,9 +156,15 @@ class VOC2012Dataset(Dataset):
     def transform_image_and_ltrb(self, image, ltrb):
         if self.augment:
             new_image, new_ltrb = self._flip_horizontal(image=image, ltrb=ltrb)
-            new_image, new_ltrb = self._scale_randomly(image=new_image, ltrb=new_ltrb)
-            new_image, new_ltrb = self._shift_randomly(image=new_image, ltrb=new_ltrb)
-            new_image, new_ltrb = self._crop_center(image=new_image, ltrb=new_ltrb)
+            new_image, new_ltrb = self._scale_randomly(
+                image=new_image, ltrb=new_ltrb,
+            )
+            new_image, new_ltrb = self._shift_randomly(
+                image=new_image, ltrb=new_ltrb,
+            )
+            new_image, new_ltrb = self._crop_center(
+                image=new_image, ltrb=new_ltrb,
+            )
             new_image = self._randomly_adjust_b_and_s(new_image)
         new_image = TF.to_tensor(new_image)
         new_image = TF.normalize(new_image, mean=self.mean, std=self.std)
@@ -166,9 +172,11 @@ class VOC2012Dataset(Dataset):
 
     def __getitem__(self, idx):
         xml_path = self.xml_paths[idx]
-        image, gt_ltrb, label = self.parse_xml_file(xml_path)
-        image, gt_ltrb = self.transform_image_and_ltrb(image=image, ltrb=gt_ltrb)
-        return image, {"ltrb": gt_ltrb, "label": label}
+        image, ltrb, label = self.parse_xml_file(xml_path)
+        image, ltrb = self.transform_image_and_ltrb(
+            image=image, ltrb=ltrb,
+        )
+        return image, ltrb, label
 
     @staticmethod
     def ltrb_to_xywh(ltrb):
@@ -182,97 +190,102 @@ class VOC2012Dataset(Dataset):
             dim=-1,
         )
 
-    def normalize_xywh(self, xywh):
-        return torch.stack(
-            [
-                xywh[..., 0] % self.cell_size / self.cell_size,
-                xywh[..., 1] % self.cell_size / self.cell_size,
-                xywh[..., 2] / self.img_size,
-                xywh[..., 3] / self.img_size,
-            ],
-            dim=-1,
-        )
+    # def normalize_xywh(self, xywh):
+    #     return torch.stack(
+    #         [
+    #             xywh[..., 0] % self.cell_size / self.cell_size,
+    #             xywh[..., 1] % self.cell_size / self.cell_size,
+    #             xywh[..., 2] / self.img_size,
+    #             xywh[..., 3] / self.img_size,
+    #         ],
+    #         dim=-1,
+    #     )
 
-    def ltrb_to_object_index(self, ltrb):
-        xywh = self.ltrb_to_xywh(ltrb)
-        return (xywh[..., : 2] // self.cell_size).long()
+    # def ltrb_to_object_index(self, ltrb):
+    #     xywh = self.ltrb_to_xywh(ltrb)
+    #     return (xywh[..., : 2] // self.cell_size).long()
 
-    def row_index_to_obj_mask(self, row_idx):
-        """
-        "$\mathbb{1}^{obj}_{i}$"; "If object appears in cell $i$."
-        """
-        obj_mask = torch.zeros(size=((self.n_cells ** 2), 1, 1), dtype=torch.bool)
-        obj_mask[row_idx] = True
-        return obj_mask
+    # def row_index_to_obj_mask(self, row_idx):
+    #     """
+    #     "$\mathbb{1}^{obj}_{i}$"; "If object appears in cell $i$."
+    #     """
+    #     obj_mask = torch.zeros(
+    #         size=((self.n_cells ** 2), 1, 1), dtype=torch.bool,
+    #     )
+    #     obj_mask[row_idx] = True
+    #     return obj_mask
 
-    def ltrb_to_row_index(self, ltrb):
-        obj_idx = self.ltrb_to_object_index(ltrb)
-        row_idx = obj_idx[:, 0] * self.n_cells + obj_idx[:, 1]
+    # def ltrb_to_row_index(self, ltrb):
+    #     obj_idx = self.ltrb_to_object_index(ltrb)
+    #     row_idx = obj_idx[:, 0] * self.n_cells + obj_idx[:, 1]
 
-        cnts = defaultdict(int)
-        exists = defaultdict(bool)
-        valid_indices = list()
-        for idx in range(row_idx.size(0)):
-            row = row_idx[idx].item()
-            if cnts[row] < self.n_bboxes_per_cell:
-                i = 0
-                while exists[row + i * (self.n_cells ** 2)]:
-                    i += 1
-                cnts[row] += 1
-                exists[row + i * (self.n_cells ** 2)] = True
-                valid_indices.append(idx)
+    #     cnts = defaultdict(int)
+    #     exists = defaultdict(bool)
+    #     valid_indices = []
+    #     for idx in range(row_idx.size(0)):
+    #         row = row_idx[idx].item()
+    #         if cnts[row] < self.n_bboxes_per_cell:
+    #             i = 0
+    #             while exists[row + i * (self.n_cells ** 2)]:
+    #                 i += 1
+    #             cnts[row] += 1
+    #             exists[row + i * (self.n_cells ** 2)] = True
+    #             valid_indices.append(idx)
 
-        dedup_row_idx = torch.tensor(list(exists.keys()), dtype=torch.long)
-        return valid_indices, dedup_row_idx
+    #     dedup_row_idx = torch.tensor(list(exists.keys()), dtype=torch.long)
+    #     return valid_indices, dedup_row_idx
 
-    def ltrb_to_deduplicated_norm_xywh(self, ltrb, valid_indices, row_idx):
-        gt_xywh = self.ltrb_to_xywh(ltrb)
-        dedup_gt_xywh = gt_xywh[valid_indices]
-        dedup_gt_norm_xywh = self.normalize_xywh(dedup_gt_xywh)
-        new_gt_norm_xywh = torch.zeros(
-            size=((self.n_cells ** 2) * self.n_bboxes_per_cell, 4),
-            dtype=torch.float,
-        )
-        new_gt_norm_xywh[row_idx] = dedup_gt_norm_xywh
-        new_gt_norm_xywh = new_gt_norm_xywh[:, None, :]
-        return new_gt_norm_xywh
+    # def ltrb_to_deduplicated_norm_xywh(self, ltrb, valid_indices, row_idx):
+    #     xywh = self.ltrb_to_xywh(ltrb)
+    #     dedup_xywh = xywh[valid_indices]
+    #     dedup_norm_xywh = self.normalize_xywh(dedup_xywh)
+    #     new_norm_xywh = torch.zeros(
+    #         size=((self.n_cells ** 2) * self.n_bboxes_per_cell, 4),
+    #         dtype=torch.float,
+    #     )
+    #     new_norm_xywh[row_idx] = dedup_norm_xywh
+    #     new_norm_xywh = new_norm_xywh[:, None, :]
+    #     return new_norm_xywh
 
-    def class_index_to_class_prob(self, label, valid_indices, row_idx):
-        gt_cls_prob = F.one_hot(label, num_classes=self.n_classes).float()
-        dedup_gt_cls_prob = gt_cls_prob[valid_indices]
-        new_gt_cls_prob = torch.zeros(
-            size=((self.n_cells ** 2) * self.n_bboxes_per_cell, self.n_classes),
-            dtype=torch.float,
-        )
-        new_gt_cls_prob[row_idx] = dedup_gt_cls_prob
-        new_gt_cls_prob = new_gt_cls_prob[:, None, :]
-        return new_gt_cls_prob
+    # def class_index_to_class_prob(self, label, valid_indices, row_idx):
+    #     cls_prob = F.one_hot(label, num_classes=self.n_classes).float()
+    #     dedup_cls_prob = cls_prob[valid_indices]
+    #     new_cls_prob = torch.zeros(
+    #         size=((self.n_cells ** 2) * self.n_bboxes_per_cell, self.n_classes),
+    #         dtype=torch.float,
+    #     )
+    #     new_cls_prob[row_idx] = dedup_cls_prob
+    #     new_cls_prob = new_cls_prob[:, None, :]
+    #     return new_cls_prob
 
-
-def collate_fn(batch):
-    images = list()
-    for image, annot in batch:
-        images.append(image)
-    return torch.stack(images, dim=0), annot
+    @staticmethod
+    def collate_fn(batch):
+        images, ltrbs, labels = list(zip(*batch))
+        annots = {"ltrbs": ltrbs, "labels": labels}
+        return torch.stack(images, dim=0), annots
 
 
 if __name__ == "__main__":
     ds = VOC2012Dataset(
-        # annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
-        annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
+        annot_dir="/Users/jongbeomkim/Documents/datasets/voc2012/VOCdevkit/VOC2012/Annotations",
+        # annot_dir="/home/jbkim/Documents/datasets/VOCtrainval_11-May-2012/VOCdevkit/VOC2012/Annotations",
         augment=True,
     )
+
     dl = DataLoader(
         ds,
         batch_size=4,
         num_workers=0,
         pin_memory=True,
         drop_last=True,
-        collate_fn=collate_fn,
+        collate_fn=ds.collate_fn,
     )
-    di = iter(dl)
+    for batch_idx, (image, annots) in enumerate(dl):
+        if batch_idx >= 10:
+            break
+        # print(image.shape)
+        print([ltrb.shape for ltrb in annots["ltrbs"]])
+        print([label.shape for label in annots["labels"]])
 
-    image, annot = next(di)
-    # image.shape, annot["ltrb"].shape, annot["label"].shape
-    # annot["ltrb"]
-    # annot["label"]
+    annots["ltrbs"][0]
+    annots["labels"][0]
