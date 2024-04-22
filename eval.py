@@ -11,54 +11,57 @@ import numpy as np
 torch.set_printoptions(linewidth=70)
 
 
-def get_dtype(bbox):
-    if bbox.device.type == "mps":
+def get_dtype(ltrb):
+    if ltrb.device.type == "mps":
         return torch.float32
     else:
         # return torch.float64
         return torch.float32
 
-def get_area(bbox):
+
+def get_area(ltrb):
     """
     args:
-        bbox: Tensor of shape (B, C, N, 4)
+        ltrb: Tensor of shape (N, 4)
     returns:
-        Tensor of shape (B, C, N)
+        Tensor of shape (N)
     """
-    dtype = get_dtype(bbox)
+    dtype = get_dtype(ltrb)
     return torch.clip(
-        bbox[:, :, :, 2] - bbox[:, :, :, 0], min=0
-    ) * torch.clip(bbox[:, :, :, 3] - bbox[:, :, :, 1], min=0).to(dtype)
+        ltrb[..., 2] - ltrb[..., 0], min=0
+    ) * torch.clip(ltrb[..., 3] - ltrb[..., 1], min=0).to(dtype)
 
 
-def get_intersection_area(bbox1, bbox2):
+def get_intersection_area(ltrb1, ltrb2):
     """
     args:
-        bbox1: Tensor of shape (B, C, N, 4)
-        bbox2: Tensor of shape (B, C, M, 4)
+        ltrb1: Tensor of shape (N, 4)
+        ltrb2: Tensor of shape (M, 4)
     returns:
-        Tensor of shape (B, C, N, M)
+        Tensor of shape (N, M)
     """
-    dtype = get_dtype(bbox1)
-    l = torch.maximum(bbox1[:, :, :, 0][:, :, :, None], bbox2[:, :, :, 0][:, :, None, :])
-    t = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 1][:, :, None, :])
-    r = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 2][:, :, None, :])
-    b = torch.maximum(bbox1[:, :, :, 1][:, :, :, None], bbox2[:, :, :, 3][:, :, None, :])
+    # ltrb1 = pred_ltrb
+    # ltrb2 = gt_ltrb
+    dtype = get_dtype(ltrb1)
+    l = torch.maximum(ltrb1[..., 0][..., None], ltrb2[..., 0][None, ...])
+    t = torch.maximum(ltrb1[..., 1][..., None], ltrb2[..., 1][None, ...])
+    r = torch.maximum(ltrb1[..., 2][..., None], ltrb2[..., 2][None, ...])
+    b = torch.maximum(ltrb1[..., 3][..., None], ltrb2[..., 3][None, ...])
     return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).to(dtype)
 
 
-def get_iou(bbox1, bbox2):
+def get_iou(ltrb1, ltrb2):
     """
     args:
-        bbox1: Tensor of shape (B, C, N, 4)
-        bbox2: Tensor of shape (B, C, M, 4)
+        ltrb1: Tensor of shape (N, 4)
+        ltrb2: Tensor of shape (M, 4)
     returns:
-        Tensor of shape (B, C, N, M)
+        Tensor of shape (N, M)
     """
-    bbox1_area = get_area(bbox1)
-    bbox2_area = get_area(bbox2)
-    intersec_area = get_intersection_area(bbox1, bbox2)
-    union_area = bbox1_area[:, :, :, None] + bbox2_area[:, :, None, :] - intersec_area
+    ltrb1_area = get_area(ltrb1)
+    ltrb2_area = get_area(ltrb2)
+    intersec_area = get_intersection_area(ltrb1, ltrb2)
+    union_area = ltrb1_area[..., None] + ltrb2_area[None, ...] - intersec_area
     return torch.where(union_area == 0, 0., intersec_area / union_area)
 
 

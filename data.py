@@ -170,14 +170,6 @@ class VOC2012Dataset(Dataset):
         new_image = TF.normalize(new_image, mean=self.mean, std=self.std)
         return new_image, new_ltrb
 
-    def __getitem__(self, idx):
-        xml_path = self.xml_paths[idx]
-        image, ltrb, label = self.parse_xml_file(xml_path)
-        image, ltrb = self.transform_image_and_ltrb(
-            image=image, ltrb=ltrb,
-        )
-        return image, ltrb, label
-
     @staticmethod
     def ltrb_to_xywh(ltrb):
         return torch.stack(
@@ -190,73 +182,25 @@ class VOC2012Dataset(Dataset):
             dim=-1,
         )
 
-    # def normalize_xywh(self, xywh):
-    #     return torch.stack(
-    #         [
-    #             xywh[..., 0] % self.cell_size / self.cell_size,
-    #             xywh[..., 1] % self.cell_size / self.cell_size,
-    #             xywh[..., 2] / self.img_size,
-    #             xywh[..., 3] / self.img_size,
-    #         ],
-    #         dim=-1,
-    #     )
+    def normalize_xywh(self, xywh):
+        return torch.stack(
+            [
+                xywh[..., 0] % self.cell_size / self.cell_size,
+                xywh[..., 1] % self.cell_size / self.cell_size,
+                xywh[..., 2] / self.img_size,
+                xywh[..., 3] / self.img_size,
+            ],
+            dim=-1,
+        )
 
-    # def ltrb_to_object_index(self, ltrb):
-    #     xywh = self.ltrb_to_xywh(ltrb)
-    #     return (xywh[..., : 2] // self.cell_size).long()
-
-    # def row_index_to_obj_mask(self, row_idx):
-    #     """
-    #     "$\mathbb{1}^{obj}_{i}$"; "If object appears in cell $i$."
-    #     """
-    #     obj_mask = torch.zeros(
-    #         size=((self.n_cells ** 2), 1, 1), dtype=torch.bool,
-    #     )
-    #     obj_mask[row_idx] = True
-    #     return obj_mask
-
-    # def ltrb_to_row_index(self, ltrb):
-    #     obj_idx = self.ltrb_to_object_index(ltrb)
-    #     row_idx = obj_idx[:, 0] * self.n_cells + obj_idx[:, 1]
-
-    #     cnts = defaultdict(int)
-    #     exists = defaultdict(bool)
-    #     valid_indices = []
-    #     for idx in range(row_idx.size(0)):
-    #         row = row_idx[idx].item()
-    #         if cnts[row] < self.n_bboxes_per_cell:
-    #             i = 0
-    #             while exists[row + i * (self.n_cells ** 2)]:
-    #                 i += 1
-    #             cnts[row] += 1
-    #             exists[row + i * (self.n_cells ** 2)] = True
-    #             valid_indices.append(idx)
-
-    #     dedup_row_idx = torch.tensor(list(exists.keys()), dtype=torch.long)
-    #     return valid_indices, dedup_row_idx
-
-    # def ltrb_to_deduplicated_norm_xywh(self, ltrb, valid_indices, row_idx):
-    #     xywh = self.ltrb_to_xywh(ltrb)
-    #     dedup_xywh = xywh[valid_indices]
-    #     dedup_norm_xywh = self.normalize_xywh(dedup_xywh)
-    #     new_norm_xywh = torch.zeros(
-    #         size=((self.n_cells ** 2) * self.n_bboxes_per_cell, 4),
-    #         dtype=torch.float,
-    #     )
-    #     new_norm_xywh[row_idx] = dedup_norm_xywh
-    #     new_norm_xywh = new_norm_xywh[:, None, :]
-    #     return new_norm_xywh
-
-    # def class_index_to_class_prob(self, label, valid_indices, row_idx):
-    #     cls_prob = F.one_hot(label, num_classes=self.n_classes).float()
-    #     dedup_cls_prob = cls_prob[valid_indices]
-    #     new_cls_prob = torch.zeros(
-    #         size=((self.n_cells ** 2) * self.n_bboxes_per_cell, self.n_classes),
-    #         dtype=torch.float,
-    #     )
-    #     new_cls_prob[row_idx] = dedup_cls_prob
-    #     new_cls_prob = new_cls_prob[:, None, :]
-    #     return new_cls_prob
+    def __getitem__(self, idx):
+        xml_path = self.xml_paths[idx]
+        image, ltrb, label = self.parse_xml_file(xml_path)
+        image, ltrb = self.transform_image_and_ltrb(image=image, ltrb=ltrb)
+        return image, ltrb, label
+        # xywh = self.ltrb_to_xywh(ltrb)
+        # norm_xywh = self.normalize_xywh(xywh)
+        # return image, norm_xywh, label
 
     @staticmethod
     def collate_fn(batch):
@@ -284,8 +228,8 @@ if __name__ == "__main__":
         if batch_idx >= 10:
             break
         # print(image.shape)
-        print([ltrb.shape for ltrb in annots["ltrbs"]])
-        print([label.shape for label in annots["labels"]])
+        # print([ltrb.shape for ltrb in annots["ltrbs"]])
+        # print([label.shape for label in annots["labels"]])
 
     annots["ltrbs"][0]
     annots["labels"][0]
