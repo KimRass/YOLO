@@ -460,26 +460,18 @@ if __name__ == "__main__":
             pred_conf2,
             pred_prob,
         ) = torch.tensor_split(pred, (4, 5, 9, 10), dim=0)
-        pred_norm_xywh = torch.cat(
+        pred_norm_xywh = torch.stack(
             [
                 einops.rearrange(pred_norm_xywh1, pattern="c h w -> (h w) c"),
                 einops.rearrange(pred_norm_xywh1, pattern="c h w -> (h w) c"),
             ],
-            dim=0,
+            dim=1,
         )
-        pred_conf = torch.cat(
-            [
-                einops.rearrange(pred_conf1, pattern="c h w -> (h w) c"),
-                einops.rearrange(pred_conf1, pattern="c h w -> (h w) c"),
-            ],
-            dim=0,
-        )
-
         pred_xywh = model.denormalize_xywh(pred_norm_xywh)
         pred_ltrb = model.xywh_to_ltrb(pred_xywh)
-        # pred_xywh.shape
 
         iou = get_iou(pred_ltrb, gt_ltrb)
+        pred_ltrb.shape, gt_ltrb.shape
         iou.shape
         obj_mask = model.get_object_mask(gt_ltrb)
         obj_mask = obj_mask.view(49).repeat(2)[..., None]
@@ -491,6 +483,12 @@ if __name__ == "__main__":
         "The confidence prediction represents the IoU between the predicted box
         and any ground truth box.
         """
+        """
+        "At training time we only want one bounding box predictor to be
+        responsible for each object. We assign one predictor to be
+        'responsible' for predicting an object based on which prediction has
+        the highest current IoU with the ground truth."
+        """
         iou.shape, obj_mask.shape
         _, max_iou_idx = torch.max(iou, dim=1, keepdim=False)
         iou.shape, max_iou_idx.shape
@@ -500,6 +498,13 @@ if __name__ == "__main__":
         pred = einops.rearrange(pred, pattern="(2 c) h w -> (h w) c")
         iou.shape, obj_mask.shape, pred.shape
 
+        pred_conf = torch.stack(
+            [
+                einops.rearrange(pred_conf1, pattern="c h w -> (h w) c"),
+                einops.rearrange(pred_conf1, pattern="c h w -> (h w) c"),
+            ],
+            dim=1,
+        )
 
 
     # optim = AdamW(model.parameters(), lr=0.0001)
