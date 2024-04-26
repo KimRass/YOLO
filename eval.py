@@ -45,8 +45,8 @@ def get_intersection_area(ltrb1, ltrb2):
     dtype = get_dtype(ltrb1)
     l = torch.maximum(ltrb1[..., 0][..., None], ltrb2[..., 0][None, ...])
     t = torch.maximum(ltrb1[..., 1][..., None], ltrb2[..., 1][None, ...])
-    r = torch.maximum(ltrb1[..., 2][..., None], ltrb2[..., 2][None, ...])
-    b = torch.maximum(ltrb1[..., 3][..., None], ltrb2[..., 3][None, ...])
+    r = torch.minimum(ltrb1[..., 2][..., None], ltrb2[..., 2][None, ...])
+    b = torch.minimum(ltrb1[..., 3][..., None], ltrb2[..., 3][None, ...])
     return torch.clip(r - l, min=0) * torch.clip(b - t, min=0).to(dtype)
 
 
