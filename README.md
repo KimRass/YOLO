@@ -16,5 +16,37 @@ $$\sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} \mathbb{1}^{obj}_{ij} (C_{i} - \hat{C}_{
 $$\lambda_{noobj} \sum^{S^{2}}_{i = 0} \sum^{B}_{j = 0} 1^{noobj}_{ij} \big( C_{i} - \hat{C}_{i} \big)^{2}$$
 $$\sum^{S^{2}}_{i = 0} \mathbb{1}^{obj}_{i} \sum_{c \in classes} \big(p_{i}(c) - \hat{p}_{i}(c)\big)^{2}$$
 
-# 2. References
+# 2. Samples
+
+<table>
+    <thead>
+        <tr>
+            <th colspan="3">Ground truth</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/ground_truth/2007_000250.jpg" width="200"></td>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/ground_truth/2007_000876.jpg" width="200"></td>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/ground_truth/2007_001763.jpg" width="200"></td>
+        </tr>
+    </tbody>
+</table>
+<table>
+    <thead>
+        <tr>
+            <th colspan="3">Model output</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/predicted_bboxes/1.jpg" width="200"></td>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/predicted_bboxes/2.jpg" width="200"></td>
+            <td><img src="https://raw.githubusercontent.com/KimRass/YOLO/refs/heads/main/samples/predicted_bboxes/3.jpg" width="200"></td>
+        </tr>
+    </tbody>
+</table>
+
+
+# 3. References
 - [1] https://machinethink.net/blog/object-detection/
